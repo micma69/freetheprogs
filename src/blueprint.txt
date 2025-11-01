@@ -1,0 +1,52 @@
+src/
+│
+├── backend/                         # Server side (Express + Node)
+│   ├── index.ts                     # Entry point server
+│   ├── routes/
+│   │   │   └── fileRoutes.ts        # Endpoint upload, convert, parse
+│   ├── controllers/
+│   │   │   └── fileController.ts    # Logic untuk handle request/responses
+│   ├── services/
+│   │   │   └── parserService.ts     # Fungsi parser 3D file (functional style)
+│   ├── utils/
+│   │   │   ├── validators.ts        # Validator fungsional (composed)
+│   │   │   ├── converter.ts         # Konversi antar format 3D
+│   │   │   └── result.ts            # Tipe Result<Success, Error> (monad-style)
+│   │   └── types/
+│   │       └── models.ts            # Definisi tipe (TypeScript interfaces)
+│   ├── package.json
+│   └── tsconfig.json
+│
+├── frontend/                        # React + TypeScript app
+│   ├── public/
+│   │   └── index.html
+│   ├── components/
+│   │   ├── FileUploader.tsx     # Upload file 3D
+│   │   ├── Viewer3D.tsx         # Render 3D pakai Three.js/WebGL
+│   │   └── ConverterPanel.tsx   # Ubah format 3D
+│   ├── hooks/
+│   │   └── useFileParser.ts     # Functional hooks untuk parsing
+│   ├── utils/
+│   │   └── apiClient.ts         # Hubungan ke backend (axios/fetch)
+│   ├── styles/
+│   │       └── main.css
+│   ├── package.json
+│   ├── tsconfig.json
+│   ├── App.tsx
+│   └── index.tsx
+│
+├── shared/                          # Logika bersama (bisa diimport frontend/backend)
+│   ├── parser/
+│   │   ├── objParser.ts             # Parser untuk .obj
+│   │   ├── gltfParser.ts            # Parser untuk .gltf
+│   │   ├── plyParser.ts             # Parser untuk .ply
+│   │   └── index.ts                 # Export semua parser
+│   ├── validator/
+│   │   ├── schemaValidator.ts       # Gabungan multiple validator (function composition)
+│   │   └── fileValidator.ts
+│   └── types.ts                     # Tipe umum untuk model 3D
+|
+├── blueprint.txt
+└── package.json                     # Root dependencies (workspaces optional)
+ProgressReport.md
+README.md
