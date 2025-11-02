@@ -1,40 +1,42 @@
-# 2025/2026 Pemrograman Fungsional 
+# 3D Format Parser and Converter
 
-================================================================================
-                                Free The Progs 
+A web application for viewing and converting 3D file formats using functional programming principles.
 
---------------------------------------------------------------------------------
+## Features
 
-Perkenalkan, kami dari Tim Free The Progs (atau bisa ditulis sebagai)
-freetheprogs. Kami akan membuat ekstensi Chrome yang bertujuan untuk :
-
-  MENAMPILKAN TAB-TAB BERDASARKAN KONSUMSI RAM 
-
-Yes. Itu misi utama kami disini.
-
-Tetap semangat dan jangan sampai laptopmu terbakar karena tab-tab yang
-membuat RAM kerja kayak kuda.
-
-Penjelasan bagian-bagian modul sumber ekstensi kami
-
-/manifest.json -> file source code dasar untuk ekstensi Chrome
-
-/package.json -> untuk akses library fp 
-
-/src -> berisi kodingan source code
-
-/src/background ->
-
-/src/logic -> logika dasar program kami, berbasis paradigma pemrograman fungsional
-
-/src/popup -> dasar pop up ekstensi kami
-
-/src/popup/ui -> untuk user interface ekstensi kami
-
-/src/style -> untuk membuat tampilan UI lebih menarik
-
-/src/style/icons -> tempat penyimpanan ikon-ikon buat UI
-
-/dist -> versi siap pakai 
+- Parse and validate 3D files (OBJ, STL, PLY, GLTF)
+- Convert between different 3D formats (WIP)
+- 3D viewer with 14-angle camera option (X+, X-, Y+, Y-, Z+, Z-, + diagonals) (TODO)
 
 
+## Project Structure
+
+```
+project/
+├── backend/          # Node.js + Express + TypeScript
+├── frontend/         # React + TypeScript + WebGL
+├── shared/             # Shared types and utilities
+└── tests/           # Unit tests
+```
+
+## Setup
+
+1. Install dependencies:
+```bash
+npm run install-all
+```
+
+2. Run development servers:
+```bash
+# Terminal 1 - Backend
+npm run dev:backend
+
+# Terminal 2 - Frontend
+npm run dev:frontend
+```
+
+## Technologies
+
+- **Backend**: Node.js, TypeScript, Express.js
+- **Frontend**: React, TypeScript, WebGL
+- **Paradigm**: Functional Programming

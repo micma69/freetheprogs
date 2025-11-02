@@ -1,0 +1,16 @@
+{
+  "name": "3d-format-parser-converter",
+  "version": "1.0.0",
+  "description": "3D Format Parser and Converter with semi-Viewer using Functional Programming",
+  "scripts": {
+    "install-all": "cd backend && npm install && cd ../frontend && npm install",
+    "dev:backend": "cd backend && npm run dev",
+    "dev:frontend": "cd frontend && npm run dev",
+    "build:backend": "cd backend && npm run build",
+    "build:frontend": "cd frontend && npm run build",
+    "test": "cd backend && npm test && cd ../frontend && npm test"
+  },
+  "keywords": ["3d", "parser", "converter", "functional-programming"],
+  "author": "",
+  "license": "MIT"
+}
