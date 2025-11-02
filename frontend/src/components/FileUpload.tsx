@@ -32,8 +32,8 @@ const FileUpload: React.FC<FileUploadProps> = ({
 
     const fileExtension = selectedFile.name.split('.').pop()?.toLowerCase();
 
-    if (fileExtension !== 'obj') {
-      onError('Only OBJ files are supported in this version');
+    if (fileExtension !== 'obj' && fileExtension !== 'ply') {
+      onError('Only OBJ and PLY files are supported in this version');
       return;
     }
 
@@ -44,7 +44,12 @@ const FileUpload: React.FC<FileUploadProps> = ({
       const formData = new FormData();
       formData.append('file', selectedFile);
 
-      const response = await fetch('http://localhost:3001/api/parse/obj', {
+      const endpoint =
+      fileExtension === 'obj'
+        ? 'http://localhost:3001/api/parse/obj'
+        : 'http://localhost:3001/api/parse/ply';
+
+      const response = await fetch(endpoint, {
         method: 'POST',
         body: formData,
       });
@@ -82,7 +87,7 @@ const FileUpload: React.FC<FileUploadProps> = ({
         <input
           id="file-input"
           type="file"
-          accept=".obj"
+          accept=".obj,.ply"
           onChange={handleFileSelect}
           className="file-input"
         />
