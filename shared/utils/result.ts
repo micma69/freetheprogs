@@ -1,6 +1,5 @@
 /**
- * Result monad for functional error handling
- * Inspired by Rust's Result type
+ * Result monad 
  */
 
 export type Result<T, E = Error> =
@@ -47,7 +46,7 @@ export const mapErr = <T, E, F>(
 };
 
 /**
- * Chain/flatMap - monadic bind
+ * flatMap - monadic bind
  */
 export const andThen = <T, U, E>(
   result: Result<T, E>,
@@ -107,4 +106,23 @@ export const isOk = <T, E>(result: Result<T, E>): result is { ok: true; value: T
  */
 export const isErr = <T, E>(result: Result<T, E>): result is { ok: false; error: E } => {
   return !result.ok;
+};
+
+export const flatMap = andThen; 
+
+export const all = <T, E>(results: Result<T, E>[]): Result<T[], E> => {
+  const values: T[] = [];
+  for (const result of results) {
+    if (!result.ok) return result;
+    values.push(result.value);
+  }
+  return Ok(values);
+};
+
+
+export const pipe = <T>(
+  value: T,
+  ...fns: Array<(arg: any) => any>
+): any => {
+  return fns.reduce((acc, fn) => fn(acc), value);
 };

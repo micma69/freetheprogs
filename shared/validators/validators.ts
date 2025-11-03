@@ -3,7 +3,7 @@
  * All validators are pure functions that can be chained together
  */
 
-import type { Scene, Vertex, Vec3, Mesh } from '../types/scene';
+import type { Scene, Vertex, Vec3, Vec2, Mesh } from '../types/scene';
 import type { Result } from '../utils/result';
 import { Ok, Err } from '../utils/result';
 
@@ -43,6 +43,29 @@ export const validateNumber = (value: number): Result<number, ValidationError> =
     });
   }
   return Ok(value);
+};
+
+/**
+ * Validate that a 2D vector has valid components
+ */
+export const validateVec2 = (vec: Vec2): Result<Vec2, ValidationError> => {
+  const xResult = validateNumber(vec.x);
+  if (!xResult.ok) {
+    return Err({
+      ...xResult.error,
+      path: 'vec2.x',
+    });
+  }
+
+  const yResult = validateNumber(vec.y);
+  if (!yResult.ok) {
+    return Err({
+      ...yResult.error,
+      path: 'vec2.y',
+    });
+  }
+
+  return Ok(vec);
 };
 
 /**
