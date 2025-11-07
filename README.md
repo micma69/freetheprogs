@@ -14,7 +14,11 @@ freetheprogs. Kami akan membuat program edit file yang bertujuan untuk :
 - Convert between different 3D formats (WIP)
 - 3D viewer with 14-angle camera option (X+, X-, Y+, Y-, Z+, Z-, + diagonals) (TODO)
 
+<<<<<<< HEAD
 >>>>>>> daa90d6d1737a13a246b296f815686733f1c621b
+=======
+>>>>>>> 7768ad9e91284393188d893fba408248728aeb76
+>>>>>>> 513b437eef23acf4a0ab606febdc8a0fa33c0285
 
 ## Project Structure
 
@@ -49,4 +53,8 @@ npm run dev:frontend
 - **Backend**: Node.js, TypeScript, Express.js
 - **Frontend**: React, TypeScript, WebGL
 - **Paradigm**: Functional Programming
+<<<<<<< HEAD
 >>>>>>> daa90d6d1737a13a246b296f815686733f1c621b
+=======
+>>>>>>> 7768ad9e91284393188d893fba408248728aeb76
+>>>>>>> 513b437eef23acf4a0ab606febdc8a0fa33c0285
