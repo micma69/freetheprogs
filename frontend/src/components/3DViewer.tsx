@@ -109,21 +109,28 @@ const Viewer3D: React.FC<Viewer3DProps> = ({ scene }) => {
     const normalLocation = gl.getAttribLocation(program, 'a_normal');
     const matrixLocation = gl.getUniformLocation(program, 'u_matrix');
 
-    // Collect all vertices from meshes
+    // FIX: Correct vertex and index collection
     const allVertices: Vertex[] = [];
     const allIndices: number[] = [];
     let indexOffset = 0;
 
     for (const mesh of scene.meshes) {
+      // Copy ALL vertices first
+      allVertices.push(...mesh.vertices);
+      
+      // Then copy indices with offset
       for (const face of mesh.faces) {
         for (const index of face.indices) {
-          if (mesh.vertices[index]) {
-            allVertices.push(mesh.vertices[index]);
-            allIndices.push(indexOffset + index);
-          }
+          allIndices.push(indexOffset + index);
         }
       }
+      
       indexOffset += mesh.vertices.length;
+    }
+
+    if (allVertices.length === 0) {
+      console.warn('No vertices to render');
+      return;
     }
 
     // Create buffers
@@ -136,11 +143,12 @@ const Viewer3D: React.FC<Viewer3DProps> = ({ scene }) => {
 
     const normalBuffer = gl.createBuffer();
     gl.bindBuffer(gl.ARRAY_BUFFER, normalBuffer);
+    // FIX: Better normal handling
     const normals = new Float32Array(
       allVertices.flatMap((v) =>
         v.normal
           ? [v.normal.x, v.normal.y, v.normal.z]
-          : [0, 0, 0]
+          : [0, 1, 0] // Use up vector as default
       )
     );
     gl.bufferData(gl.ARRAY_BUFFER, normals, gl.STATIC_DRAW);
@@ -247,18 +255,60 @@ const Viewer3D: React.FC<Viewer3DProps> = ({ scene }) => {
       gl.drawElements(gl.TRIANGLES, allIndices.length, gl.UNSIGNED_SHORT, 0);
     };
 
+    // FIX: Add resize handling
+    const handleResize = () => {
+      canvas.width = canvas.clientWidth;
+      canvas.height = canvas.clientHeight;
+      gl.viewport(0, 0, canvas.width, canvas.height);
+      render();
+    };
+
+    handleResize(); // Initial size
+    window.addEventListener('resize', handleResize);
+
     render();
+
+    return () => {
+      window.removeEventListener('resize', handleResize);
+    };
   }, [scene]);
 
   return (
     <div className="viewer-3d">
       <h2>3D Viewer</h2>
-      <div className="viewer-stats">
-        <p>Vertices: {scene.metadata.vertexCount}</p>
-        <p>Faces: {scene.metadata.faceCount}</p>
-        <p>Format: {scene.metadata.format}</p>
+      <div className="viewer-layout">
+        <div className="viewer-left">
+          <canvas ref={canvasRef} className="viewer-canvas" />
+        </div>
+        <div className="viewer-right">
+          <div className="viewer-convert">
+            <h3>Convert To</h3>
+            <div className="convert-buttons">
+              <button className="convert-btn" disabled>A</button>
+              <button className="convert-btn" disabled>B</button>
+              <button className="convert-btn" disabled>C</button>
+              <button className="convert-btn" disabled>D</button>
+            </div>
+          </div>
+          <div className="viewer-meta">
+            <h3>Object Metadata</h3>
+            <div className="viewer-stats">
+              <p><strong>Format:</strong> {scene.metadata.format}</p>
+              <p><strong>Vertices:</strong> {scene.metadata.vertexCount}</p>
+              <p><strong>Faces:</strong> {scene.metadata.faceCount}</p>
+              {scene.metadata.boundingBox && (
+                <>
+                  <p><strong>Bounding Box:</strong></p>
+                  <p>Min: ({scene.metadata.boundingBox.min.x.toFixed(2)}, {scene.metadata.boundingBox.min.y.toFixed(2)}, {scene.metadata.boundingBox.min.z.toFixed(2)})</p>
+                  <p>Max: ({scene.metadata.boundingBox.max.x.toFixed(2)}, {scene.metadata.boundingBox.max.y.toFixed(2)}, {scene.metadata.boundingBox.max.z.toFixed(2)})</p>
+                </>
+              )}
+              <p><strong>Meshes:</strong> {scene.meshes.length}</p>
+              <p><strong>Materials:</strong> {scene.materials.length}</p>
+            </div>
+          </div>
+        </div>
       </div>
-      <canvas ref={canvasRef} className="viewer-canvas" />
     </div>
   );
 };
