@@ -126,3 +126,43 @@ export const pipe = <T>(
 ): any => {
   return fns.reduce((acc, fn) => fn(acc), value);
 };
+
+/**
+ * Functional array utilities that work with Result type
+ */
+export const mapArray = <A, B>(fn: (a: A) => B) => (arr: readonly A[]): readonly B[] =>
+  arr.map(fn);
+
+export const filterArray = <A>(predicate: (a: A) => boolean) => (arr: readonly A[]): readonly A[] =>
+  arr.filter(predicate);
+
+export const reduceArray = <A, B>(reducer: (acc: B, val: A) => B, initial: B) => (arr: readonly A[]): B =>
+  arr.reduce(reducer, initial);
+
+export const flatMapArray = <A, B>(fn: (a: A) => readonly B[]) => (arr: readonly A[]): readonly B[] =>
+  arr.flatMap(fn);
+
+export const takeArray = (count: number) => <T>(arr: readonly T[]): readonly T[] =>
+  arr.slice(0, count);
+
+export const dropArray = (count: number) => <T>(arr: readonly T[]): readonly T[] =>
+  arr.slice(count);
+
+export const zipArray = <A, B>(arrA: readonly A[], arrB: readonly B[]): readonly (readonly [A, B])[] =>
+  arrA.slice(0, Math.min(arrA.length, arrB.length)).map((a, i) => [a, arrB[i]] as const);
+
+/**
+ * Traverse implementation using `all` function
+ * Applies a function that returns Result to each element and collects all Results
+ */
+export const traverse = <A, B, E>(fn: (a: A) => Result<B, E>) => (arr: readonly A[]): Result<readonly B[], E> =>
+  all(arr.map(fn));
+
+/**
+ * Composition helper for working with Results in pipe
+ */
+export const mapWith = <A, B, E>(fn: (a: A) => B) => (result: Result<A, E>): Result<B, E> =>
+  map(result, fn);
+
+export const andThenWith = <A, B, E>(fn: (a: A) => Result<B, E>) => (result: Result<A, E>): Result<B, E> =>
+  andThen(result, fn);

@@ -4,15 +4,14 @@
  * Supports ASCII, binary_little_endian, and binary_big_endian formats
  */
 
-import type { Scene, Vertex, Vec3, Vec2, Face, Mesh, Material } from '../types/scene';
+import type { Scene, Vertex, Vec3, Vec2, Face, Mesh } from '../types/scene';
 import type { Result } from '../utils/result';
-import { Ok, Err } from '../utils/result';
+import { Ok, Err, map, andThen, pipe, all, takeArray, dropArray, zipArray, traverse } from '../utils/result';
 import {
   createVec3,
   createVec2,
   createVertex,
   createFace,
-  createMaterial,
   createMesh,
   createScene,
 } from '../types/scene';
@@ -41,9 +40,12 @@ type PLYHeader = {
   readonly elements: Readonly<Record<string, PLYElement>>;
 };
 
-/**
- * Parse PLY header into structured data
- */
+type VertexData = {
+  readonly position: Vec3;
+  readonly normal?: Vec3;
+  readonly texCoord?: Vec2;
+};
+
 const parseFormat = (line: string, lineNumber: number): Result<{ format: PLYHeader["format"]; version: string }, ParseError> => {
   const parts = line.split(/\s+/);
   if (parts.length < 3) return Err({ message: "Invalid format line", line: lineNumber });
@@ -72,7 +74,6 @@ const parseProperty = (line: string, lineNumber: number): Result<PLYProperty, Pa
   const parts = line.split(/\s+/);
   if (parts.length < 3) return Err({ message: "Invalid property line", line: lineNumber });
   
-  // Handle list properties: "property list uchar int vertex_indices"
   if (parts[1] === 'list') {
     if (parts.length < 5) return Err({ message: "Invalid list property line", line: lineNumber });
     return Ok({
@@ -83,7 +84,6 @@ const parseProperty = (line: string, lineNumber: number): Result<PLYProperty, Pa
     });
   }
   
-  // Handle regular properties: "property float x"
   return Ok({
     name: parts[2],
     type: parts[1],
@@ -91,62 +91,173 @@ const parseProperty = (line: string, lineNumber: number): Result<PLYProperty, Pa
   });
 };
 
-const addPropertyToElement = (elem: PLYElement, property: PLYProperty): PLYElement => ({
+const addPropertyToElement = (property: PLYProperty) => (elem: PLYElement): PLYElement => ({
   ...elem,
   properties: [...elem.properties, property],
 });
+
+const processHeaderLine = (
+  state: Result<{ header: Omit<PLYHeader, 'elements'> & { elements: Record<string, PLYElement> }; currentElement: PLYElement | null }, ParseError>,
+  line: string,
+  lineNumber: number
+): Result<{ header: Omit<PLYHeader, 'elements'> & { elements: Record<string, PLYElement> }; currentElement: PLYElement | null }, ParseError> => {
+  if (!state.ok) return state;
+
+  const { header, currentElement } = state.value;
+  const trimmed = line.trim();
+  
+  if (trimmed === "end_header") return Ok({ header, currentElement });
+  if (trimmed === "" || trimmed.startsWith("comment")) return Ok({ header, currentElement });
+
+  if (trimmed.startsWith("format")) {
+    return pipe(
+      parseFormat(trimmed, lineNumber),
+      result => map(result, ({ format, version }) => ({
+        header: { ...header, format, version },
+        currentElement
+      }))
+    );
+  }
+
+  if (trimmed.startsWith("element")) {
+    return pipe(
+      parseElement(trimmed, lineNumber),
+      result => map(result, element => ({
+        header: { ...header, elements: { ...header.elements, [element.name]: element } },
+        currentElement: element
+      }))
+    );
+  }
+
+  if (trimmed.startsWith("property")) {
+    if (!currentElement) return Err({ message: "Property without element", line: lineNumber });
+    
+    return pipe(
+      parseProperty(trimmed, lineNumber),
+      result => map(result, property => {
+        const updatedElement = addPropertyToElement(property)(currentElement);
+        return {
+          header: { ...header, elements: { ...header.elements, [updatedElement.name]: updatedElement } },
+          currentElement: updatedElement
+        };
+      })
+    );
+  }
+
+  return Ok({ header, currentElement });
+};
 
 const parseHeader = (lines: readonly string[]): Result<{ header: PLYHeader; dataStartIndex: number }, ParseError> => {
   if (lines[0]?.trim() !== "ply") {
     return Err({ message: "Missing 'ply' header", line: 1 });
   }
 
-  let format: PLYHeader["format"] = "ascii";
-  let version = "1.0";
-  const elements: Record<string, PLYElement> = {};
-  let currentElement: PLYElement | null = null;
-
-  for (let i = 1; i < lines.length; i++) {
-    const line = lines[i].trim();
-    if (line === "end_header") {
-      return Ok({
-        header: { format, version, elements },
-        dataStartIndex: i + 1,
-      });
-    }
-
-    if (line === "" || line.startsWith("comment")) continue;
-
-    if (line.startsWith("format")) {
-      const result = parseFormat(line, i + 1);
-      if (!result.ok) return result;
-      ({ format, version } = result.value);
-      continue;
-    }
-
-    if (line.startsWith("element")) {
-      const result = parseElement(line, i + 1);
-      if (!result.ok) return result;
-      currentElement = result.value;
-      elements[currentElement.name] = currentElement;
-      continue;
-    }
-
-    if (line.startsWith("property")) {
-      if (!currentElement) return Err({ message: "Property without element", line: i + 1 });
-      const result = parseProperty(line, i + 1);
-      if (!result.ok) return result;
-      currentElement = addPropertyToElement(currentElement, result.value);
-      elements[currentElement.name] = currentElement;
-    }
+  const endHeaderIndex = lines.findIndex(line => line.trim() === "end_header");
+  if (endHeaderIndex === -1) {
+    return Err({ message: "Missing end_header", line: lines.length });
   }
 
-  return Err({ message: "Missing end_header", line: lines.length });
+  const headerLines = lines.slice(1, endHeaderIndex);
+  const initialState: Result<{ header: Omit<PLYHeader, 'elements'> & { elements: Record<string, PLYElement> }; currentElement: PLYElement | null }, ParseError> = 
+    Ok({ 
+      header: { format: "ascii" as const, version: "1.0", elements: {} }, 
+      currentElement: null 
+    });
+
+  const finalState = headerLines.reduce(
+    (state, line, i) => processHeaderLine(state, line, i + 2),
+    initialState
+  );
+
+  return pipe(
+    finalState,
+    result => map(result, ({ header }) => ({
+      header: header as PLYHeader,
+      dataStartIndex: endHeaderIndex + 1
+    }))
+  );
 };
 
-/**
- * ASCII body parser that handles normals and texture coordinates
- */
+const parseAsciiVertexProperties = (
+  values: number[],
+  properties: readonly PLYProperty[]
+): Result<VertexData, ParseError> => {
+  const propertyValuePairs = zipArray(properties, values);
+  
+  const initialData: VertexData = { position: createVec3(0, 0, 0) };
+  
+  const finalResult = propertyValuePairs.reduce(
+    (acc: Result<VertexData, ParseError>, [prop, value]) => 
+      pipe(
+        acc,
+        result => andThen(result, data => {
+          if (isNaN(value)) {
+            return Err({ message: `Invalid vertex property value for ${prop.name}`, line: -1 });
+          }
+
+          const updatePosition = (updater: (pos: Vec3) => Vec3) => ({
+            ...data,
+            position: updater(data.position)
+          });
+
+          const updateNormal = (updater: (normal: Vec3) => Vec3) => ({
+            ...data,
+            normal: data.normal ? updater(data.normal) : updater(createVec3(0, 0, 0))
+          });
+
+          const updateTexCoord = (updater: (texCoord: Vec2) => Vec2) => ({
+            ...data,
+            texCoord: data.texCoord ? updater(data.texCoord) : updater(createVec2(0, 0))
+          });
+
+          switch (prop.name) {
+            case 'x': return Ok(updatePosition(pos => createVec3(value, pos.y, pos.z)));
+            case 'y': return Ok(updatePosition(pos => createVec3(pos.x, value, pos.z)));
+            case 'z': return Ok(updatePosition(pos => createVec3(pos.x, pos.y, value)));
+            case 'nx': return Ok(updateNormal(normal => createVec3(value, normal.y, normal.z)));
+            case 'ny': return Ok(updateNormal(normal => createVec3(normal.x, value, normal.z)));
+            case 'nz': return Ok(updateNormal(normal => createVec3(normal.x, normal.y, value)));
+            case 's': case 'u': case 'texture_u': 
+              return Ok(updateTexCoord(tex => createVec2(value, tex.y)));
+            case 't': case 'v': case 'texture_v': 
+              return Ok(updateTexCoord(tex => createVec2(tex.x, value)));
+            default: return Ok(data);
+          }
+        })
+      ),
+    Ok(initialData) as Result<VertexData, ParseError>
+  );
+
+  return pipe(
+    finalResult,
+    result => andThen(result, data => 
+      data.position.x === 0 && data.position.y === 0 && data.position.z === 0
+        ? Err({ message: "Missing vertex position data", line: -1 })
+        : Ok(data)
+    )
+  );
+};
+
+const parseAsciiVertexLine = (properties: readonly PLYProperty[]) => (line: string): Result<Vertex, ParseError> => 
+  pipe(
+    parseAsciiVertexProperties(line.trim().split(/\s+/).map(parseFloat), properties),
+    result => map(result, ({ position, normal, texCoord }) => 
+      createVertex(position, normal, texCoord)
+    )
+  );
+
+const parseAsciiFaceLine = (line: string): Result<Face, ParseError> => {
+  const parts = line.trim().split(/\s+/).map(parseFloat);
+  const vertexCount = parts[0];
+  
+  if (isNaN(vertexCount) || vertexCount < 3) {
+    return Err({ message: "Invalid face vertex count", line: -1 });
+  }
+  
+  const indices = parts.slice(1, 1 + vertexCount).map((n) => n | 0);
+  return Ok(createFace(indices));
+};
+
 const parseAsciiBody = (
   lines: readonly string[],
   header: PLYHeader,
@@ -159,117 +270,23 @@ const parseAsciiBody = (
     return Err({ message: "Missing vertex element", line: startIndex });
   }
 
-  const vertices: Vertex[] = [];
-  const faces: Face[] = [];
-  let lineIndex = startIndex;
+  const bodyLines = lines.slice(startIndex);
+  const vertexLines = takeArray(vertexElem.count)(bodyLines);
+  const faceLines = faceElem ? takeArray(faceElem.count)(dropArray(vertexElem.count)(bodyLines)) : [];
 
-  // Parse vertex lines with support for normals and texture coordinates
-  for (let i = 0; i < vertexElem.count; i++) {
-    const line = lines[lineIndex++]?.trim();
-    if (!line) return Err({ message: "Unexpected end of file in vertex list", line: lineIndex });
-    
-    const parts = line.split(/\s+/).map(parseFloat);
-    const vertexData = parseAsciiVertexProperties(parts, vertexElem.properties);
-    
-    if (!vertexData.ok) return vertexData;
-    
-    vertices.push(createVertex(
-      vertexData.value.position,
-      vertexData.value.normal,
-      vertexData.value.texCoord
-    ));
-  }
-
-  // Parse face lines
-  if (faceElem) {
-    for (let i = 0; i < faceElem.count; i++) {
-      const line = lines[lineIndex++]?.trim();
-      if (!line) return Err({ message: "Unexpected end of file in face list", line: lineIndex });
-      const parts = line.split(/\s+/).map(parseFloat);
-      const vertexCount = parts[0];
-      if (isNaN(vertexCount) || vertexCount < 3) {
-        return Err({ message: "Invalid face vertex count", line: lineIndex });
-      }
-
-      const indices = parts.slice(1, 1 + vertexCount).map((n) => n | 0);
-      faces.push(createFace(indices));
-    }
-  }
-
-  return Ok({
-    vertices: Object.freeze(vertices),
-    faces: Object.freeze(faces),
-  });
+  return pipe(
+    traverse(parseAsciiVertexLine(vertexElem.properties))(vertexLines),
+    result => andThen(result, vertices =>
+      faceElem
+        ? pipe(
+            traverse(parseAsciiFaceLine)(faceLines),
+            result => map(result, faces => ({ vertices, faces }))
+          )
+        : Ok({ vertices, faces: [] as readonly Face[] })
+    )
+  );
 };
 
-/**
- * Parse ASCII vertex properties with support for normals and texture coordinates
- */
-const parseAsciiVertexProperties = (
-  values: number[],
-  properties: readonly PLYProperty[]
-): Result<{ position: Vec3; normal?: Vec3; texCoord?: Vec2 }, ParseError> => {
-  let position: Vec3 | undefined;
-  let normal: Vec3 | undefined;
-  let texCoord: Vec2 | undefined;
-
-  for (let i = 0; i < properties.length; i++) {
-    const prop = properties[i];
-    const value = values[i];
-    
-    if (isNaN(value)) {
-      return Err({ message: `Invalid vertex property value for ${prop.name}`, line: -1 });
-    }
-
-    switch (prop.name) {
-      case 'x':
-        if (!position) position = createVec3(value, 0, 0);
-        else position = createVec3(value, position.y, position.z);
-        break;
-      case 'y':
-        if (!position) position = createVec3(0, value, 0);
-        else position = createVec3(position.x, value, position.z);
-        break;
-      case 'z':
-        if (!position) position = createVec3(0, 0, value);
-        else position = createVec3(position.x, position.y, value);
-        break;
-      case 'nx':
-        if (!normal) normal = createVec3(value, 0, 0);
-        else normal = createVec3(value, normal.y, normal.z);
-        break;
-      case 'ny':
-        if (!normal) normal = createVec3(0, value, 0);
-        else normal = createVec3(normal.x, value, normal.z);
-        break;
-      case 'nz':
-        if (!normal) normal = createVec3(0, 0, value);
-        else normal = createVec3(normal.x, normal.y, value);
-        break;
-      case 's': case 'u': case 'texture_u':
-        if (!texCoord) texCoord = createVec2(value, 0);
-        else texCoord = createVec2(value, texCoord.y);
-        break;
-      case 't': case 'v': case 'texture_v':
-        if (!texCoord) texCoord = createVec2(0, value);
-        else texCoord = createVec2(texCoord.x, value);
-        break;
-      // Ignore color properties
-      case 'r': case 'g': case 'b': case 'red': case 'green': case 'blue': case 'alpha':
-        break;
-    }
-  }
-
-  if (!position) {
-    return Err({ message: "Missing vertex position data", line: -1 });
-  }
-
-  return Ok({ position, normal, texCoord });
-};
-
-/**
- * Enhanced binary reader that handles different data types and endianness
- */
 const createBinaryReader = (dataView: DataView, littleEndian: boolean) => {
   let offset = 0;
 
@@ -347,15 +364,92 @@ const createBinaryReader = (dataView: DataView, littleEndian: boolean) => {
     return Ok(undefined);
   };
 
-  const getOffset = () => offset;
-  const setOffset = (newOffset: number) => { offset = newOffset; };
-
-  return { read, skip, getOffset, setOffset };
+  return { read, skip, getOffset: () => offset, setOffset: (newOffset: number) => { offset = newOffset; } };
 };
 
-/**
- * Parse binary body from ArrayBuffer with proper endianness handling
- */
+const parseBinaryVertex = (reader: ReturnType<typeof createBinaryReader>, properties: readonly PLYProperty[]): Result<Vertex, ParseError> => {
+  const initialData: VertexData = { position: createVec3(0, 0, 0) };
+  
+  const finalResult = properties.reduce(
+    (acc: Result<VertexData, ParseError>, prop) => 
+      pipe(
+        acc,
+        result => andThen(result, data =>
+          pipe(
+            reader.read(prop.type),
+            result => map(result, value => {
+              const updatePosition = (updater: (pos: Vec3) => Vec3) => ({
+                ...data,
+                position: updater(data.position)
+              });
+
+              const updateNormal = (updater: (normal: Vec3) => Vec3) => ({
+                ...data,
+                normal: data.normal ? updater(data.normal) : updater(createVec3(0, 0, 0))
+              });
+
+              const updateTexCoord = (updater: (texCoord: Vec2) => Vec2) => ({
+                ...data,
+                texCoord: data.texCoord ? updater(data.texCoord) : updater(createVec2(0, 0))
+              });
+
+              switch (prop.name) {
+                case 'x': return updatePosition(pos => createVec3(value, pos.y, pos.z));
+                case 'y': return updatePosition(pos => createVec3(pos.x, value, pos.z));
+                case 'z': return updatePosition(pos => createVec3(pos.x, pos.y, value));
+                case 'nx': return updateNormal(normal => createVec3(value, normal.y, normal.z));
+                case 'ny': return updateNormal(normal => createVec3(normal.x, value, normal.z));
+                case 'nz': return updateNormal(normal => createVec3(normal.x, normal.y, value));
+                case 's': case 'u': case 'texture_u': return updateTexCoord(tex => createVec2(value, tex.y));
+                case 't': case 'v': case 'texture_v': return updateTexCoord(tex => createVec2(tex.x, value));
+                default: return data;
+              }
+            })
+          )
+        )
+      ),
+    Ok(initialData) as Result<VertexData, ParseError>
+  );
+
+  return pipe(
+    finalResult,
+    result => andThen(result, data =>
+      data.position ? Ok(createVertex(data.position, data.normal, data.texCoord)) 
+      : Err({ message: "Missing vertex position data", line: -1 })
+    )
+  );
+};
+
+const parseBinaryFace = (reader: ReturnType<typeof createBinaryReader>, properties: readonly PLYProperty[]): Result<Face, ParseError> => {
+  const initialIndices: number[] = [];
+  
+  const finalResult = properties.reduce(
+    (acc: Result<number[], ParseError>, prop) =>
+      pipe(
+        acc,
+        result => andThen(result, indices => {
+          if (prop.isList && (prop.name === 'vertex_indices' || prop.name === 'vertex_index')) {
+            return pipe(
+              reader.read(prop.listType!),
+              result => andThen(result, vertexCount =>
+                all(Array.from({ length: vertexCount }, () => reader.read(prop.type)))
+              ),
+              result => map(result, newIndices => [...indices, ...newIndices])
+            );
+          } else {
+            return pipe(
+              reader.skip(prop.type),
+              result => map(result, () => indices)
+            );
+          }
+        })
+      ),
+    Ok(initialIndices) as Result<number[], ParseError>
+  );
+
+  return map(finalResult, indices => createFace(indices));
+};
+
 const parseBinaryBodyFromArrayBuffer = (
   buffer: ArrayBuffer,
   header: PLYHeader
@@ -371,136 +465,41 @@ const parseBinaryBodyFromArrayBuffer = (
   const dataView = new DataView(buffer);
   const reader = createBinaryReader(dataView, littleEndian);
 
-  const vertices: Vertex[] = [];
-  const faces: Face[] = [];
-
-  // Parse vertices
-  for (let i = 0; i < vertexElem.count; i++) {
-    let position: Vec3 | undefined;
-    let normal: Vec3 | undefined;
-    let texCoord: Vec2 | undefined;
-
-    for (const prop of vertexElem.properties) {
-      const valueResult = reader.read(prop.type);
-      if (!valueResult.ok) return valueResult;
-      
-      const value = valueResult.value;
-
-      switch (prop.name) {
-        case 'x':
-          position = createVec3(value, position?.y || 0, position?.z || 0);
-          break;
-        case 'y':
-          position = createVec3(position?.x || 0, value, position?.z || 0);
-          break;
-        case 'z':
-          position = createVec3(position?.x || 0, position?.y || 0, value);
-          break;
-        case 'nx':
-          normal = createVec3(value, normal?.y || 0, normal?.z || 0);
-          break;
-        case 'ny':
-          normal = createVec3(normal?.x || 0, value, normal?.z || 0);
-          break;
-        case 'nz':
-          normal = createVec3(normal?.x || 0, normal?.y || 0, value);
-          break;
-        case 's': case 'u': case 'texture_u':
-          texCoord = createVec2(value, texCoord?.y || 0);
-          break;
-        case 't': case 'v': case 'texture_v':
-          texCoord = createVec2(texCoord?.x || 0, value);
-          break;
-        // Skip color properties
-        case 'r': case 'g': case 'b': case 'red': case 'green': case 'blue': case 'alpha':
-          break;
-      }
-    }
-
-    if (!position) {
-      return Err({ message: "Missing vertex position data", line: -1 });
-    }
-
-    vertices.push(createVertex(position, normal, texCoord));
-  }
-
-  // Parse faces
-  if (faceElem) {
-    for (let i = 0; i < faceElem.count; i++) {
-      const indices: number[] = [];
-      
-      for (const prop of faceElem.properties) {
-        if (prop.isList && (prop.name === 'vertex_indices' || prop.name === 'vertex_index')) {
-          // Read list count
-          const countResult = reader.read(prop.listType!);
-          if (!countResult.ok) return countResult;
-          const vertexCount = countResult.value;
-          
-          // Read list elements
-          for (let j = 0; j < vertexCount; j++) {
-            const indexResult = reader.read(prop.type);
-            if (!indexResult.ok) return indexResult;
-            indices.push(indexResult.value);
-          }
-        } else {
-          // Skip single-value properties
-          const skipResult = reader.skip(prop.type);
-          if (!skipResult.ok) return skipResult;
-        }
-      }
-
-      if (indices.length > 0) {
-        faces.push(createFace(indices));
-      }
-    }
-  }
-
-  return Ok({
-    vertices: Object.freeze(vertices),
-    faces: Object.freeze(faces),
-  });
+  return pipe(
+    all(Array.from({ length: vertexElem.count }, () => parseBinaryVertex(reader, vertexElem.properties))),
+    result => andThen(result, vertices =>
+      faceElem
+        ? pipe(
+            all(Array.from({ length: faceElem.count }, () => parseBinaryFace(reader, faceElem.properties))),
+            result => map(result, faces => ({ vertices, faces }))
+          )
+        : Ok({ vertices, faces: [] as readonly Face[] })
+    )
+  );
 };
 
-/**
- * Parse binary PLY from ArrayBuffer
- */
-const parseBinaryFromArrayBuffer = (buffer: ArrayBuffer): Result<Scene, ParseError> => {
-  // Extract header text (first ~1KB)
-  const headerBytes = new Uint8Array(buffer, 0, Math.min(1024, buffer.byteLength));
-  const headerText = new TextDecoder('ascii').decode(headerBytes);
-  const headerLines = headerText.split('\n');
+const calculateBoundingBox = (vertices: readonly Vertex[]): { readonly min: Vec3; readonly max: Vec3 } | undefined => {
+  if (vertices.length === 0) return undefined;
 
-  const headerResult = parseHeader(headerLines);
-  if (!headerResult.ok) return headerResult;
+  return vertices.reduce(
+    (acc, vertex) => {
+      const { x, y, z } = vertex.position;
+      return {
+        min: createVec3(Math.min(acc.min.x, x), Math.min(acc.min.y, y), Math.min(acc.min.z, z)),
+        max: createVec3(Math.max(acc.max.x, x), Math.max(acc.max.y, y), Math.max(acc.max.z, z))
+      };
+    },
+    {
+      min: createVec3(Infinity, Infinity, Infinity),
+      max: createVec3(-Infinity, -Infinity, -Infinity)
+    }
+  );
+};
 
-  const { header } = headerResult.value;
-
-  // Find binary data start (after "end_header")
-  const endHeaderIndex = headerText.indexOf('end_header');
-  if (endHeaderIndex === -1) {
-    return Err({ message: "Could not find end_header", line: -1 });
-  }
-
-  // Calculate exact binary data start position
-  let binaryStart = endHeaderIndex + 'end_header'.length;
-  
-  // Skip line endings
-  const nextChar = headerText[binaryStart];
-  if (nextChar === '\r') binaryStart++;
-  if (headerText[binaryStart] === '\n') binaryStart++;
-
-  // Get binary data directly from ArrayBuffer
-  const binaryData = buffer.slice(binaryStart);
-  const bodyResult = parseBinaryBodyFromArrayBuffer(binaryData, header);
-  if (!bodyResult.ok) return bodyResult;
-
-  const { vertices, faces } = bodyResult.value;
-
-  const mesh = createMesh("default", vertices, faces);
+const createSceneFromMeshData = (vertices: readonly Vertex[], faces: readonly Face[]): Scene => {
   const boundingBox = calculateBoundingBox(vertices);
-
-  const scene = createScene(
-    [mesh],
+  return createScene(
+    [createMesh("default", vertices, faces)],
     [],
     {
       format: "PLY",
@@ -509,71 +508,49 @@ const parseBinaryFromArrayBuffer = (buffer: ArrayBuffer): Result<Scene, ParseErr
       boundingBox
     }
   );
-
-  return Ok(scene);
 };
 
-/**
- * Calculate bounding box for scene metadata
- */
-const calculateBoundingBox = (vertices: readonly Vertex[]): { readonly min: Vec3; readonly max: Vec3 } | undefined => {
-  if (vertices.length === 0) return undefined;
+const parseBinaryFromArrayBuffer = (buffer: ArrayBuffer): Result<Scene, ParseError> => {
+  const headerBytes = new Uint8Array(buffer, 0, Math.min(1024, buffer.byteLength));
+  const headerText = new TextDecoder('ascii').decode(headerBytes);
+  const headerLines = headerText.split('\n');
 
-  let minX = Infinity, minY = Infinity, minZ = Infinity;
-  let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
+  return pipe(
+    parseHeader(headerLines),
+    result => andThen(result, ({ header }) => {
+      const endHeaderIndex = headerText.indexOf('end_header');
+      if (endHeaderIndex === -1) {
+        return Err({ message: "Could not find end_header", line: -1 });
+      }
 
-  for (const vertex of vertices) {
-    const { x, y, z } = vertex.position;
-    minX = Math.min(minX, x); minY = Math.min(minY, y); minZ = Math.min(minZ, z);
-    maxX = Math.max(maxX, x); maxY = Math.max(maxY, y); maxZ = Math.max(maxZ, z);
-  }
+      let binaryStart = endHeaderIndex + 'end_header'.length;
+      const nextChar = headerText[binaryStart];
+      if (nextChar === '\r') binaryStart++;
+      if (headerText[binaryStart] === '\n') binaryStart++;
 
-  return {
-    min: createVec3(minX, minY, minZ),
-    max: createVec3(maxX, maxY, maxZ)
-  };
+      return pipe(
+        parseBinaryBodyFromArrayBuffer(buffer.slice(binaryStart), header),
+        result => map(result, ({ vertices, faces }) => createSceneFromMeshData(vertices, faces))
+      );
+    })
+  );
 };
 
-/**
- * Parse ASCII PLY from string
- */
 const parseASCII = (content: string): Result<Scene, ParseError> => {
   const lines = Object.freeze(content.split(/\r?\n/));
   if (lines.length === 0) {
     return Err({ message: "Empty PLY file", line: 0 });
   }
 
-  const headerResult = parseHeader(lines);
-  if (!headerResult.ok) return headerResult;
-
-  const { header, dataStartIndex } = headerResult.value;
-
-  // Allow ASCII format to proceed
-  if (header.format !== "ascii") {
-    // If it's binary but passed as string, try to parse it anyway (fallback)
-    console.warn('Binary PLY passed as string - attempting fallback parsing');
-  }
-
-  const bodyResult = parseAsciiBody(lines, header, dataStartIndex);
-  if (!bodyResult.ok) return bodyResult;
-
-  const { vertices, faces } = bodyResult.value;
-
-  const mesh = createMesh("default", vertices, faces);
-  const boundingBox = calculateBoundingBox(vertices);
-
-  const scene = createScene(
-    [mesh],
-    [],
-    {
-      format: "PLY",
-      vertexCount: vertices.length,
-      faceCount: faces.length,
-      boundingBox
-    }
+  return pipe(
+    parseHeader(lines),
+    result => andThen(result, ({ header, dataStartIndex }) =>
+      pipe(
+        parseAsciiBody(lines, header, dataStartIndex),
+        result => map(result, ({ vertices, faces }) => createSceneFromMeshData(vertices, faces))
+      )
+    )
   );
-
-  return Ok(scene);
 };
 
 /**
@@ -588,9 +565,7 @@ export const parsePLY = (content: string | ArrayBuffer): Result<Scene, ParseErro
     const headerView = new Uint8Array(content, 0, Math.min(1024, content.byteLength));
     const headerText = new TextDecoder('utf-8').decode(headerView);
     
-    const isBinary = headerText.includes('format binary_');
-    
-    if (isBinary) {
+    if (headerText.includes('format binary_')) {
       return parseBinaryFromArrayBuffer(content);
     } else {
       const fullText = new TextDecoder('utf-8').decode(new Uint8Array(content));
