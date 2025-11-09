@@ -8,6 +8,7 @@ import multer from 'multer';
 import { parseOBJ } from '../../shared/parsers/obj'
 import type { ParseError } from '../../shared/parsers/obj';
 import { parsePLY } from '../../shared/parsers/ply'
+import { parseGLTF } from '@shared/parsers/gltf';
 
 const app = express();
 const port = 3001;
@@ -64,6 +65,33 @@ app.post('/api/parse/ply', upload.single('file'), (req: Request, res: Response) 
 
   const content = req.file.buffer.toString('utf-8');
   const result = parsePLY(content);
+
+  if (result.ok) {
+    res.json({
+      success: true,
+      data: result.value,
+    });
+  } else {
+    const error = result.error as ParseError;
+    res.status(400).json({
+      success: false,
+      error: {
+        message: error.message,
+        line: error.line,
+        column: error.column,
+      },
+    });
+  }
+});
+
+// Parse Gltf file endpoint
+app.post('/api/parse/gltf', upload.single('file'), (req: Request, res: Response) => {
+  if (!req.file) {
+    return res.status(400).json({ error: 'No file uploaded' });
+  }
+
+  const content = req.file.buffer.toString('utf-8');
+  const result = parseGLTF(content);
 
   if (result.ok) {
     res.json({
