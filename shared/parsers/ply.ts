@@ -22,10 +22,17 @@ export type ParseError = {
   readonly line: number;
 };
 
+type PLYProperty = {
+  readonly name: string;
+  readonly type: string;
+  readonly isList: boolean;
+  readonly listType?: string;
+};
+
 type PLYElement = {
   readonly name: string;
   readonly count: number;
-  readonly properties: readonly string[];
+  readonly properties: readonly PLYProperty[];
 };
 
 type PLYHeader = {
@@ -61,17 +68,33 @@ const parseElement = (line: string, lineNumber: number): Result<PLYElement, Pars
   return Ok({ name, count, properties: [] });
 };
 
-const addPropertyToElement = (elem: PLYElement, property: string): PLYElement => ({
+const parseProperty = (line: string, lineNumber: number): Result<PLYProperty, ParseError> => {
+  const parts = line.split(/\s+/);
+  if (parts.length < 3) return Err({ message: "Invalid property line", line: lineNumber });
+  
+  // Handle list properties: "property list uchar int vertex_indices"
+  if (parts[1] === 'list') {
+    if (parts.length < 5) return Err({ message: "Invalid list property line", line: lineNumber });
+    return Ok({
+      name: parts[4],
+      type: parts[3],
+      isList: true,
+      listType: parts[2]
+    });
+  }
+  
+  // Handle regular properties: "property float x"
+  return Ok({
+    name: parts[2],
+    type: parts[1],
+    isList: false
+  });
+};
+
+const addPropertyToElement = (elem: PLYElement, property: PLYProperty): PLYElement => ({
   ...elem,
   properties: [...elem.properties, property],
 });
-
-const parseProperty = (line: string, lineNumber: number): Result<string, ParseError> => {
-  const parts = line.split(/\s+/);
-  if (parts.length < 2) return Err({ message: "Invalid property line", line: lineNumber });
-  const propertyName = parts[parts.length - 1];
-  return Ok(propertyName);
-};
 
 const parseHeader = (lines: readonly string[]): Result<{ header: PLYHeader; dataStartIndex: number }, ParseError> => {
   if (lines[0]?.trim() !== "ply") {
@@ -184,7 +207,7 @@ const parseAsciiBody = (
  */
 const parseAsciiVertexProperties = (
   values: number[],
-  properties: readonly string[]
+  properties: readonly PLYProperty[]
 ): Result<{ position: Vec3; normal?: Vec3; texCoord?: Vec2 }, ParseError> => {
   let position: Vec3 | undefined;
   let normal: Vec3 | undefined;
@@ -195,10 +218,10 @@ const parseAsciiVertexProperties = (
     const value = values[i];
     
     if (isNaN(value)) {
-      return Err({ message: `Invalid vertex property value for ${prop}`, line: -1 });
+      return Err({ message: `Invalid vertex property value for ${prop.name}`, line: -1 });
     }
 
-    switch (prop) {
+    switch (prop.name) {
       case 'x':
         if (!position) position = createVec3(value, 0, 0);
         else position = createVec3(value, position.y, position.z);
@@ -242,6 +265,200 @@ const parseAsciiVertexProperties = (
   }
 
   return Ok({ position, normal, texCoord });
+};
+
+/**
+ * Enhanced binary reader that handles different data types and endianness
+ */
+const createBinaryReader = (dataView: DataView, littleEndian: boolean) => {
+  let offset = 0;
+
+  const readers = {
+    'char': (): Result<number, ParseError> => {
+      if (offset + 1 > dataView.byteLength) return Err({ message: "Unexpected EOF", line: -1 });
+      const value = dataView.getInt8(offset);
+      offset += 1;
+      return Ok(value);
+    },
+    'uchar': (): Result<number, ParseError> => {
+      if (offset + 1 > dataView.byteLength) return Err({ message: "Unexpected EOF", line: -1 });
+      const value = dataView.getUint8(offset);
+      offset += 1;
+      return Ok(value);
+    },
+    'short': (): Result<number, ParseError> => {
+      if (offset + 2 > dataView.byteLength) return Err({ message: "Unexpected EOF", line: -1 });
+      const value = dataView.getInt16(offset, littleEndian);
+      offset += 2;
+      return Ok(value);
+    },
+    'ushort': (): Result<number, ParseError> => {
+      if (offset + 2 > dataView.byteLength) return Err({ message: "Unexpected EOF", line: -1 });
+      const value = dataView.getUint16(offset, littleEndian);
+      offset += 2;
+      return Ok(value);
+    },
+    'int': (): Result<number, ParseError> => {
+      if (offset + 4 > dataView.byteLength) return Err({ message: "Unexpected EOF", line: -1 });
+      const value = dataView.getInt32(offset, littleEndian);
+      offset += 4;
+      return Ok(value);
+    },
+    'uint': (): Result<number, ParseError> => {
+      if (offset + 4 > dataView.byteLength) return Err({ message: "Unexpected EOF", line: -1 });
+      const value = dataView.getUint32(offset, littleEndian);
+      offset += 4;
+      return Ok(value);
+    },
+    'float': (): Result<number, ParseError> => {
+      if (offset + 4 > dataView.byteLength) return Err({ message: "Unexpected EOF", line: -1 });
+      const value = dataView.getFloat32(offset, littleEndian);
+      offset += 4;
+      return Ok(value);
+    },
+    'double': (): Result<number, ParseError> => {
+      if (offset + 8 > dataView.byteLength) return Err({ message: "Unexpected EOF", line: -1 });
+      const value = dataView.getFloat64(offset, littleEndian);
+      offset += 8;
+      return Ok(value);
+    }
+  };
+
+  const read = (type: string): Result<number, ParseError> => {
+    const reader = readers[type as keyof typeof readers];
+    if (!reader) return Err({ message: `Unsupported data type: ${type}`, line: -1 });
+    return reader();
+  };
+
+  const skip = (type: string): Result<void, ParseError> => {
+    const sizes: Record<string, number> = {
+      'char': 1, 'uchar': 1,
+      'short': 2, 'ushort': 2,
+      'int': 4, 'uint': 4,
+      'float': 4, 'double': 8
+    };
+    const size = sizes[type];
+    if (!size) return Err({ message: `Unknown type size: ${type}`, line: -1 });
+    
+    if (offset + size > dataView.byteLength) {
+      return Err({ message: "Unexpected EOF while skipping", line: -1 });
+    }
+    offset += size;
+    return Ok(undefined);
+  };
+
+  const getOffset = () => offset;
+  const setOffset = (newOffset: number) => { offset = newOffset; };
+
+  return { read, skip, getOffset, setOffset };
+};
+
+/**
+ * Parse binary body from ArrayBuffer with proper endianness handling
+ */
+const parseBinaryBodyFromArrayBuffer = (
+  buffer: ArrayBuffer,
+  header: PLYHeader
+): Result<{ vertices: readonly Vertex[]; faces: readonly Face[] }, ParseError> => {
+  const vertexElem = header.elements["vertex"];
+  const faceElem = header.elements["face"];
+
+  if (!vertexElem) {
+    return Err({ message: "Missing vertex element", line: -1 });
+  }
+
+  const littleEndian = header.format === "binary_little_endian";
+  const dataView = new DataView(buffer);
+  const reader = createBinaryReader(dataView, littleEndian);
+
+  const vertices: Vertex[] = [];
+  const faces: Face[] = [];
+
+  // Parse vertices
+  for (let i = 0; i < vertexElem.count; i++) {
+    let position: Vec3 | undefined;
+    let normal: Vec3 | undefined;
+    let texCoord: Vec2 | undefined;
+
+    for (const prop of vertexElem.properties) {
+      const valueResult = reader.read(prop.type);
+      if (!valueResult.ok) return valueResult;
+      
+      const value = valueResult.value;
+
+      switch (prop.name) {
+        case 'x':
+          position = createVec3(value, position?.y || 0, position?.z || 0);
+          break;
+        case 'y':
+          position = createVec3(position?.x || 0, value, position?.z || 0);
+          break;
+        case 'z':
+          position = createVec3(position?.x || 0, position?.y || 0, value);
+          break;
+        case 'nx':
+          normal = createVec3(value, normal?.y || 0, normal?.z || 0);
+          break;
+        case 'ny':
+          normal = createVec3(normal?.x || 0, value, normal?.z || 0);
+          break;
+        case 'nz':
+          normal = createVec3(normal?.x || 0, normal?.y || 0, value);
+          break;
+        case 's': case 'u': case 'texture_u':
+          texCoord = createVec2(value, texCoord?.y || 0);
+          break;
+        case 't': case 'v': case 'texture_v':
+          texCoord = createVec2(texCoord?.x || 0, value);
+          break;
+        // Skip color properties
+        case 'r': case 'g': case 'b': case 'red': case 'green': case 'blue': case 'alpha':
+          break;
+      }
+    }
+
+    if (!position) {
+      return Err({ message: "Missing vertex position data", line: -1 });
+    }
+
+    vertices.push(createVertex(position, normal, texCoord));
+  }
+
+  // Parse faces
+  if (faceElem) {
+    for (let i = 0; i < faceElem.count; i++) {
+      const indices: number[] = [];
+      
+      for (const prop of faceElem.properties) {
+        if (prop.isList && (prop.name === 'vertex_indices' || prop.name === 'vertex_index')) {
+          // Read list count
+          const countResult = reader.read(prop.listType!);
+          if (!countResult.ok) return countResult;
+          const vertexCount = countResult.value;
+          
+          // Read list elements
+          for (let j = 0; j < vertexCount; j++) {
+            const indexResult = reader.read(prop.type);
+            if (!indexResult.ok) return indexResult;
+            indices.push(indexResult.value);
+          }
+        } else {
+          // Skip single-value properties
+          const skipResult = reader.skip(prop.type);
+          if (!skipResult.ok) return skipResult;
+        }
+      }
+
+      if (indices.length > 0) {
+        faces.push(createFace(indices));
+      }
+    }
+  }
+
+  return Ok({
+    vertices: Object.freeze(vertices),
+    faces: Object.freeze(faces),
+  });
 };
 
 /**
@@ -294,120 +511,6 @@ const parseBinaryFromArrayBuffer = (buffer: ArrayBuffer): Result<Scene, ParseErr
   );
 
   return Ok(scene);
-};
-
-/**
- * Parse binary body from ArrayBuffer
- */
-const parseBinaryBodyFromArrayBuffer = (
-  buffer: ArrayBuffer,
-  header: PLYHeader
-): Result<{ vertices: readonly Vertex[]; faces: readonly Face[] }, ParseError> => {
-  const vertexElem = header.elements["vertex"];
-  const faceElem = header.elements["face"];
-
-  if (!vertexElem) {
-    return Err({ message: "Missing vertex element", line: -1 });
-  }
-
-  const littleEndian = header.format === "binary_little_endian";
-  const dataView = new DataView(buffer);
-  let offset = 0;
-
-  const vertices: Vertex[] = [];
-  const faces: Face[] = [];
-
-  // Helper functions
-  const readFloat32 = (): Result<number, ParseError> => {
-    if (offset + 4 > buffer.byteLength) {
-      return Err({ message: "Unexpected end of file in binary data", line: -1 });
-    }
-    const value = dataView.getFloat32(offset, littleEndian);
-    offset += 4;
-    return Ok(value);
-  };
-
-  const readUint8 = (): Result<number, ParseError> => {
-    if (offset + 1 > buffer.byteLength) {
-      return Err({ message: "Unexpected end of file in binary data", line: -1 });
-    }
-    const value = dataView.getUint8(offset);
-    offset += 1;
-    return Ok(value);
-  };
-
-  const readInt32 = (): Result<number, ParseError> => {
-    if (offset + 4 > buffer.byteLength) {
-      return Err({ message: "Unexpected end of file in binary data", line: -1 });
-    }
-    const value = dataView.getInt32(offset, littleEndian);
-    offset += 4;
-    return Ok(value);
-  };
-
-  // Parse vertices
-  for (let i = 0; i < vertexElem.count; i++) {
-    let position: Vec3 | undefined;
-
-    for (const prop of vertexElem.properties) {
-      if (prop === 'x' || prop === 'y' || prop === 'z') {
-        const valueResult = readFloat32();
-        if (!valueResult.ok) return valueResult;
-        
-        if (prop === 'x') position = createVec3(valueResult.value, position?.y || 0, position?.z || 0);
-        if (prop === 'y') position = createVec3(position?.x || 0, valueResult.value, position?.z || 0);
-        if (prop === 'z') position = createVec3(position?.x || 0, position?.y || 0, valueResult.value);
-      } else {
-        // Skip other vertex properties - assume float32
-        const skipResult = readFloat32();
-        if (!skipResult.ok) return skipResult;
-      }
-    }
-
-    if (!position) {
-      return Err({ message: "Missing vertex position data", line: -1 });
-    }
-
-    vertices.push(createVertex(position));
-  }
-
-  // Parse faces
-  if (faceElem) {
-    for (let i = 0; i < faceElem.count; i++) {
-      let vertexCount: number = 0;
-      const indices: number[] = [];
-      
-      // Process each face property in the exact order from header
-      for (const prop of faceElem.properties) {
-        if (prop === 'vertex_indices' || prop === 'vertex_index') {
-          // This is the list property - read count and indices
-          const countResult = readUint8();
-          if (!countResult.ok) return countResult;
-          
-          vertexCount = countResult.value;
-          
-          for (let j = 0; j < vertexCount; j++) {
-            const indexResult = readInt32();
-            if (!indexResult.ok) return indexResult;
-            indices.push(indexResult.value);
-          }
-        } else if (prop === 'red' || prop === 'green' || prop === 'blue' || prop === 'alpha') {
-          // Skip color properties - these are SINGLE values (not lists)
-          const skipResult = readUint8();
-          if (!skipResult.ok) return skipResult;
-        }
-      }
-
-      if (indices.length > 0) {
-        faces.push(createFace(indices));
-      }
-    }
-  }
-
-  return Ok({
-    vertices: Object.freeze(vertices),
-    faces: Object.freeze(faces),
-  });
 };
 
 /**
@@ -478,26 +581,22 @@ const parseASCII = (content: string): Result<Scene, ParseError> => {
  */
 export const parsePLY = (content: string | ArrayBuffer): Result<Scene, ParseError> => {
   try {
-    // Handle string input (ASCII PLY)
     if (typeof content === 'string') {
       return parseASCII(content);
     }
     
-    // Handle ArrayBuffer input (could be ASCII or binary)
     const headerView = new Uint8Array(content, 0, Math.min(1024, content.byteLength));
     const headerText = new TextDecoder('utf-8').decode(headerView);
     
-    // More robust format detection
     const isBinary = headerText.includes('format binary_');
     
     if (isBinary) {
       return parseBinaryFromArrayBuffer(content);
     } else {
-      // It's ASCII format but came as ArrayBuffer
       const fullText = new TextDecoder('utf-8').decode(new Uint8Array(content));
       return parseASCII(fullText);
     }
   } catch (error) {
-    return { success: false, error: new ParseError(`Failed to parse PLY: ${error}`) };
+    return Err({ message: `Failed to parse PLY: ${error}`, line: -1 });
   }
 };
