@@ -62,23 +62,35 @@ app.post('/api/parse/ply', upload.single('file'), (req: Request, res: Response) 
     return res.status(400).json({ error: 'No file uploaded' });
   }
 
-  const content = req.file.buffer.toString('utf-8');
-  const result = parsePLY(content);
+  try {
+    const buffer = req.file.buffer;
+    
+    const content = buffer.buffer.slice(
+      buffer.byteOffset,
+      buffer.byteOffset + buffer.byteLength
+    );
+    
+    const result = parsePLY(content);
 
-  if (result.ok) {
-    res.json({
-      success: true,
-      data: result.value,
-    });
-  } else {
-    const error = result.error as ParseError;
-    res.status(400).json({
+    if (result.ok) {
+      res.json({
+        success: true,
+        data: result.value,
+      });
+    } else {
+      const error = result.error as ParseError;
+      res.status(400).json({
+        success: false,
+        error: {
+          message: error.message,
+          line: error.line,
+        },
+      });
+    }
+  } catch (err) {
+    res.status(500).json({
       success: false,
-      error: {
-        message: error.message,
-        line: error.line,
-        column: error.column,
-      },
+      error: { message: err instanceof Error ? err.message : 'Unknown error' },
     });
   }
 });
