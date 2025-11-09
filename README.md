@@ -17,8 +17,12 @@ freetheprogs. Kami akan membuat program edit file yang bertujuan untuk :
 <<<<<<< HEAD
 >>>>>>> daa90d6d1737a13a246b296f815686733f1c621b
 =======
+<<<<<<< HEAD
+>>>>>>> daa90d6d1737a13a246b296f815686733f1c621b
+=======
 >>>>>>> 7768ad9e91284393188d893fba408248728aeb76
 >>>>>>> 513b437eef23acf4a0ab606febdc8a0fa33c0285
+>>>>>>> 0e83ac99f96284926b40b6081779e8d9bfeeccd6
 
 ## Project Structure
 
@@ -56,5 +60,9 @@ npm run dev:frontend
 <<<<<<< HEAD
 >>>>>>> daa90d6d1737a13a246b296f815686733f1c621b
 =======
+<<<<<<< HEAD
+>>>>>>> daa90d6d1737a13a246b296f815686733f1c621b
+=======
 >>>>>>> 7768ad9e91284393188d893fba408248728aeb76
 >>>>>>> 513b437eef23acf4a0ab606febdc8a0fa33c0285
+>>>>>>> 0e83ac99f96284926b40b6081779e8d9bfeeccd6
