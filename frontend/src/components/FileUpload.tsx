@@ -32,8 +32,8 @@ const FileUpload: React.FC<FileUploadProps> = ({
 
     const fileExtension = selectedFile.name.split('.').pop()?.toLowerCase();
 
-    if (fileExtension !== 'obj' && fileExtension !== 'ply') {
-      onError('Only OBJ and PLY files are supported in this version');
+    if (fileExtension !== 'obj' && fileExtension !== 'ply' && fileExtension !== 'gltf' && fileExtension !== 'glb') {
+      onError('Only OBJ, PLY and Gltf files are supported in this version');
       return;
     }
 
@@ -44,10 +44,17 @@ const FileUpload: React.FC<FileUploadProps> = ({
       const formData = new FormData();
       formData.append('file', selectedFile);
 
-      const endpoint =
-      fileExtension === 'obj'
-        ? 'http://localhost:3001/api/parse/obj'
-        : 'http://localhost:3001/api/parse/ply';
+      let endpoint: string;
+      if (fileExtension === 'obj') {
+          endpoint = 'http://localhost:3001/api/parse/obj';
+        } else if (fileExtension === 'ply') {
+          endpoint = 'http://localhost:3001/api/parse/ply';
+        } else if (fileExtension === 'gltf' || fileExtension === 'glb') {
+          endpoint = 'http://localhost:3001/api/parse/gltf';
+        } else {
+          throw new Error(`Unsupported file format: ${fileExtension}`);
+        }
+
 
       const response = await fetch(endpoint, {
         method: 'POST',
