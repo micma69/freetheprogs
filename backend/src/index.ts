@@ -56,7 +56,7 @@ app.post('/api/parse/obj', upload.single('file'), (req: Request, res: Response) 
   }
 });
 
-// Parse PLY file endpoint - FIXED VERSION
+// Parse PLY file endpoint
 app.post('/api/parse/ply', upload.single('file'), (req: Request, res: Response) => {
   if (!req.file) {
     return res.status(400).json({ error: 'No file uploaded' });
@@ -65,24 +65,12 @@ app.post('/api/parse/ply', upload.single('file'), (req: Request, res: Response) 
   try {
     const buffer = req.file.buffer;
     
-    // Peek at the header to detect format
-    const headerText = buffer.subarray(0, Math.min(1024, buffer.length)).toString('utf-8');
-    const isBinary = headerText.includes('format binary_');
+    const content = buffer.buffer.slice(
+      buffer.byteOffset,
+      buffer.byteOffset + buffer.byteLength
+    );
     
-    let result;
-
-    if (isBinary) {
-      // Binary PLY - use ArrayBuffer
-      const arrayBuffer = buffer.buffer.slice(
-        buffer.byteOffset,
-        buffer.byteOffset + buffer.byteLength
-      );
-      result = parsePLY(arrayBuffer);
-    } else {
-      // ASCII PLY - use string
-      const text = buffer.toString('utf-8');
-      result = parsePLY(text);
-    }
+    const result = parsePLY(content);
 
     if (result.ok) {
       res.json({
@@ -105,4 +93,9 @@ app.post('/api/parse/ply', upload.single('file'), (req: Request, res: Response) 
       error: { message: err instanceof Error ? err.message : 'Unknown error' },
     });
   }
+});
+
+// Start server
+app.listen(port, () => {
+  console.log(`Server is running on http://localhost:${port}`);
 });

@@ -122,7 +122,7 @@ const parseHeader = (lines: readonly string[]): Result<{ header: PLYHeader; data
 };
 
 /**
- * Enhanced ASCII body parser that handles normals and texture coordinates
+ * ASCII body parser that handles normals and texture coordinates
  */
 const parseAsciiBody = (
   lines: readonly string[],
@@ -157,7 +157,7 @@ const parseAsciiBody = (
     ));
   }
 
-  // Parse face lines (optional)
+  // Parse face lines
   if (faceElem) {
     for (let i = 0; i < faceElem.count; i++) {
       const line = lines[lineIndex++]?.trim();
@@ -286,7 +286,7 @@ const parseBinaryFromArrayBuffer = (buffer: ArrayBuffer): Result<Scene, ParseErr
     [mesh],
     [],
     {
-      format: header.format,
+      format: "PLY",
       vertexCount: vertices.length,
       faceCount: faces.length,
       boundingBox
@@ -297,7 +297,7 @@ const parseBinaryFromArrayBuffer = (buffer: ArrayBuffer): Result<Scene, ParseErr
 };
 
 /**
- * Parse binary body from ArrayBuffer - FIXED PROPERTY ORDER
+ * Parse binary body from ArrayBuffer
  */
 const parseBinaryBodyFromArrayBuffer = (
   buffer: ArrayBuffer,
@@ -346,7 +346,6 @@ const parseBinaryBodyFromArrayBuffer = (
   };
 
   // Parse vertices
-  console.log('Parsing', vertexElem.count, 'vertices...');
   for (let i = 0; i < vertexElem.count; i++) {
     let position: Vec3 | undefined;
 
@@ -372,14 +371,8 @@ const parseBinaryBodyFromArrayBuffer = (
     vertices.push(createVertex(position));
   }
 
-  console.log(`Parsed ${vertices.length} vertices, bytes used: ${offset}`);
-  console.log('Remaining bytes for faces:', buffer.byteLength - offset);
-
-  // Parse faces - FIXED: Handle property order correctly
+  // Parse faces
   if (faceElem) {
-    console.log('Parsing', faceElem.count, 'faces...');
-    console.log('Face properties in order:', faceElem.properties);
-    
     for (let i = 0; i < faceElem.count; i++) {
       let vertexCount: number = 0;
       const indices: number[] = [];
@@ -408,27 +401,7 @@ const parseBinaryBodyFromArrayBuffer = (
       if (indices.length > 0) {
         faces.push(createFace(indices));
       }
-      
-      // Debug progress
-      if (i % 500 === 0) {
-        console.log(`Parsed ${i}/${faceElem.count} faces, offset: ${offset}`);
-        if (i > 0) {
-          console.log(`  Last face had ${vertexCount} vertices, indices:`, indices);
-        }
-      }
     }
-    
-    console.log(`Parsed ${faces.length} faces`);
-  }
-
-  console.log('Final offset:', offset, 'Total binary data:', buffer.byteLength);
-  console.log('Unused bytes at end:', buffer.byteLength - offset);
-  
-  if (vertices.length > 0) {
-    console.log('First vertex:', vertices[0].position);
-  }
-  if (faces.length > 0) {
-    console.log('First face indices:', faces[0].indices);
   }
 
   return Ok({
@@ -504,9 +477,27 @@ const parseASCII = (content: string): Result<Scene, ParseError> => {
  * Top-level PLY parser - handles both string and ArrayBuffer inputs correctly
  */
 export const parsePLY = (content: string | ArrayBuffer): Result<Scene, ParseError> => {
-  if (typeof content === 'string') {
-    return parseASCII(content);
-  } else {
-    return parseBinaryFromArrayBuffer(content);
+  try {
+    // Handle string input (ASCII PLY)
+    if (typeof content === 'string') {
+      return parseASCII(content);
+    }
+    
+    // Handle ArrayBuffer input (could be ASCII or binary)
+    const headerView = new Uint8Array(content, 0, Math.min(1024, content.byteLength));
+    const headerText = new TextDecoder('utf-8').decode(headerView);
+    
+    // More robust format detection
+    const isBinary = headerText.includes('format binary_');
+    
+    if (isBinary) {
+      return parseBinaryFromArrayBuffer(content);
+    } else {
+      // It's ASCII format but came as ArrayBuffer
+      const fullText = new TextDecoder('utf-8').decode(new Uint8Array(content));
+      return parseASCII(fullText);
+    }
+  } catch (error) {
+    return { success: false, error: new ParseError(`Failed to parse PLY: ${error}`) };
   }
 };
