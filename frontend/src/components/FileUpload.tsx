@@ -1,7 +1,7 @@
 import { useState, useCallback } from 'react';
 import type { Scene } from '../types/scene';
 
-interface FileUploadProps {
+export interface FileUploadProps {
   onParsed: (scene: Scene) => void;
   onError: (error: string) => void;
   onLoading: (loading: boolean) => void;

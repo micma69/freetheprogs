@@ -7,7 +7,8 @@ import cors from 'cors';
 import multer from 'multer';
 import { parseOBJ } from '../../shared/parsers/obj'
 import type { ParseError } from '../../shared/parsers/obj';
-import { parsePLY } from '../../shared/parsers/ply'
+import { parsePLY } from '../../shared/parsers/ply';
+import { convertSceneToPLY } from '../../shared/converters/ply';
 
 const app = express();
 const port = 3001;
@@ -94,6 +95,22 @@ app.post('/api/parse/ply', upload.single('file'), (req: Request, res: Response) 
     });
   }
 });
+
+// Convert to PLY endpoint
+app.post("/api/convert/ply", (req, res) => {
+  const result = convertSceneToPLY(req.body);
+
+  if (!result.ok) {
+    return res.status(400).json({ success: false, error: result.error });
+  }
+
+  const ply = result.value;
+
+  res.setHeader("Content-Type", "application/octet-stream");
+  res.setHeader("Content-Disposition", "attachment; filename=\"converted.ply\"");
+  return res.send(ply);
+});
+
 
 // Start server
 app.listen(port, () => {

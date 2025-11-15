@@ -556,22 +556,36 @@ const parseASCII = (content: string): Result<Scene, ParseError> => {
 /**
  * Top-level PLY parser - handles both string and ArrayBuffer inputs correctly
  */
-export const parsePLY = (content: string | ArrayBuffer): Result<Scene, ParseError> => {
-  try {
-    if (typeof content === 'string') {
-      return parseASCII(content);
+const safeTextDecoder = {
+  decode: (buffer: ArrayBuffer, byteLength: number): Result<string, ParseError> => {
+    try {
+      const view = new Uint8Array(buffer, 0, Math.min(byteLength, buffer.byteLength));
+      return Ok(new TextDecoder('utf-8').decode(view));
+    } catch (error) {
+      return Err({ message: `Text decoding failed: ${error}`, line: -1 });
     }
-    
-    const headerView = new Uint8Array(content, 0, Math.min(1024, content.byteLength));
-    const headerText = new TextDecoder('utf-8').decode(headerView);
-    
-    if (headerText.includes('format binary_')) {
-      return parseBinaryFromArrayBuffer(content);
-    } else {
-      const fullText = new TextDecoder('utf-8').decode(new Uint8Array(content));
-      return parseASCII(fullText);
-    }
-  } catch (error) {
-    return Err({ message: `Failed to parse PLY: ${error}`, line: -1 });
   }
 };
+
+const safeArrayBufferDetection = (content: ArrayBuffer): Result<Scene, ParseError> => {
+  const maybeHeader = safeTextDecoder.decode(content, 1024);
+  if (!maybeHeader.ok) return Err(maybeHeader.error);
+
+  const headerText = maybeHeader.value;
+
+  // decide binary vs ascii
+  if (headerText.includes('format binary_')) {
+    return parseBinaryFromArrayBuffer(content);
+  }
+
+  // otherwise decode full file as text and parse ASCII
+  const maybeFullText = safeTextDecoder.decode(content, content.byteLength);
+  if (!maybeFullText.ok) return Err(maybeFullText.error);
+
+  return parseASCII(maybeFullText.value);
+};
+
+export const parsePLY = (content: string | ArrayBuffer): Result<Scene, ParseError> =>
+  typeof content === 'string' 
+    ? parseASCII(content)
+    : safeArrayBufferDetection(content);

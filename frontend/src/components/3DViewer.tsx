@@ -1,5 +1,7 @@
 import { useEffect, useRef } from 'react';
 import type { Scene, Vertex, Vec3 } from '../types/scene';
+import { type Result, Ok, Err } from '../../../shared/utils/result';
+import type { FileUploadProps } from './FileUpload';
 
 interface Viewer3DProps {
   scene: Scene;
@@ -273,6 +275,55 @@ const Viewer3D: React.FC<Viewer3DProps> = ({ scene }) => {
     };
   }, [scene]);
 
+const convertToPLY = async (): Promise<Result<void, string>> => {
+  if (!scene) {
+    return Err("No scene loaded");
+  }
+
+  onLoading(true);
+
+  const response = await fetch("http://localhost:3001/api/convert/ply", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(scene),
+  }).catch(() => null);
+
+  if (!response) {
+    onLoading(false);
+    return Err("Network error");
+  }
+
+  if (!response.ok) {
+    const text = await response.text().catch(() => "Unknown error");
+    onLoading(false);
+    return Err(text);
+  }
+
+  const blob = await response.blob().catch(() => null);
+
+  if (!blob) {
+    onLoading(false);
+    return Err("Could not read converted file");
+  }
+
+  // Side-effect isolated in one place
+  const downloadURL = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = downloadURL;
+  a.download = "converted.ply";
+  a.click();
+  URL.revokeObjectURL(downloadURL);
+
+  // Pure data update
+  onParsed({
+    ...scene,
+    metadata: { ...scene.metadata, format: "PLY" }
+  });
+
+  onLoading(false);
+  return Ok(undefined);
+};
+
   return (
     <div className="viewer-3d">
       <h2>3D Viewer</h2>
@@ -284,8 +335,20 @@ const Viewer3D: React.FC<Viewer3DProps> = ({ scene }) => {
           <div className="viewer-convert">
             <h3>Convert To</h3>
             <div className="convert-buttons">
-              <button className="convert-btn" disabled>A</button>
-              <button className="convert-btn" disabled>B</button>
+              <button
+               onClick={convertToPLY} //nanti ganti ke fungsi convert ke OBJ
+               className="convert-btn" 
+               disabled={scene?.metadata?.format === "OBJ"}
+              >
+                OBJ
+              </button>
+              <button
+               onClick={convertToPLY}
+               className="convert-btn" 
+               disabled={scene?.metadata?.format === "PLY"}
+              >
+                PLY
+              </button>
               <button className="convert-btn" disabled>C</button>
               <button className="convert-btn" disabled>D</button>
             </div>
