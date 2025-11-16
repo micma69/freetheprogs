@@ -1,7 +1,7 @@
-import { useEffect, useRef } from 'react';
-import type { Scene, Vertex, Vec3 } from '../types/scene';
-import { type Result, Ok, Err } from '../../../shared/utils/result';
-import type { FileUploadProps } from './FileUpload';
+import { useEffect, useRef, useState } from "react";
+import type { Scene, Vertex } from "../types/scene";
+import type { Result } from "../../../shared/utils/result";
+import { Ok, Err } from "../../../shared/utils/result";
 
 interface Viewer3DProps {
   scene: Scene;
@@ -10,6 +10,42 @@ interface Viewer3DProps {
 const Viewer3D: React.FC<Viewer3DProps> = ({ scene }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const glRef = useRef<WebGLRenderingContext | null>(null);
+
+  const [targetFormat, setTargetFormat] = useState<"OBJ" | "PLY" | "glTF" | "STL" | null>(null);
+
+  const [convertedBlob, setConvertedBlob] = useState<Blob | null>(null);
+
+  const performConversion = async (): Promise<Result<void, string>> => {
+    if (!targetFormat) return Err("No target format selected");
+
+    const response = await fetch(
+      `http://localhost:3001/api/convert/${targetFormat.toLowerCase()}`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(scene),
+      }
+    ).catch(() => null);
+
+    if (!response) return Err("Network error");
+    if (!response.ok) return Err(await response.text());
+
+    const blob = await response.blob();
+    setConvertedBlob(blob);
+
+    return Ok(undefined);
+  };
+
+  const downloadConvertedFile = () => {
+    if (!convertedBlob || !targetFormat) return;
+
+    const url = URL.createObjectURL(convertedBlob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `converted.${targetFormat.toLowerCase()}`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -376,10 +412,12 @@ const convertToOBJ = async (): Promise<Result<void, string>> => {
   return (
     <div className="viewer-3d">
       <h2>3D Viewer</h2>
+
       <div className="viewer-layout">
         <div className="viewer-left">
           <canvas ref={canvasRef} className="viewer-canvas" />
         </div>
+
         <div className="viewer-right">
           <div className="viewer-convert">
             <h3>Convert To</h3>
@@ -388,36 +426,80 @@ const convertToOBJ = async (): Promise<Result<void, string>> => {
                onClick={convertToOBJ} //nanti ganti ke fungsi convert ke OBJ
                className="convert-btn" 
                disabled={scene?.metadata?.format === "OBJ"}
+                onClick={() => setTargetFormat("OBJ")}
+                className="convert-btn"
+                disabled={
+                  scene.metadata.format === "OBJ" || targetFormat === "OBJ"
+                }
               >
                 OBJ
               </button>
               <button
-               onClick={convertToPLY}
-               className="convert-btn" 
-               disabled={scene?.metadata?.format === "PLY"}
+                onClick={() => setTargetFormat("PLY")}
+                className="convert-btn"
+                disabled={
+                  scene.metadata.format === "PLY" || targetFormat === "PLY"
+                }
               >
                 PLY
               </button>
-              <button className="convert-btn" disabled>C</button>
-              <button className="convert-btn" disabled>D</button>
+              <button
+                onClick={() => setTargetFormat("glTF")}
+                className="convert-btn"
+                disabled={
+                  scene.metadata.format === "glTF" || targetFormat === "glTF"
+                }
+              >
+                GLTF
+              </button>
+
+              <button
+                onClick={() => setTargetFormat("STL")}
+                className="convert-btn"
+                disabled={
+                  scene.metadata.format === "STL" || targetFormat === "STL"
+                }
+              >
+                STL
+              </button>
             </div>
+            <button
+              className="download-btn"
+              disabled={!targetFormat}
+              onClick={async () => {
+                const res = await performConversion();
+                if (res.ok) downloadConvertedFile();
+              }}
+            >
+              Download Converted File
+            </button>
           </div>
+
           <div className="viewer-meta">
             <h3>Object Metadata</h3>
-            <div className="viewer-stats">
-              <p><strong>Format:</strong> {scene.metadata.format}</p>
-              <p><strong>Vertices:</strong> {scene.metadata.vertexCount}</p>
-              <p><strong>Faces:</strong> {scene.metadata.faceCount}</p>
-              {scene.metadata.boundingBox && (
-                <>
-                  <p><strong>Bounding Box:</strong></p>
-                  <p>Min: ({scene.metadata.boundingBox.min.x.toFixed(2)}, {scene.metadata.boundingBox.min.y.toFixed(2)}, {scene.metadata.boundingBox.min.z.toFixed(2)})</p>
-                  <p>Max: ({scene.metadata.boundingBox.max.x.toFixed(2)}, {scene.metadata.boundingBox.max.y.toFixed(2)}, {scene.metadata.boundingBox.max.z.toFixed(2)})</p>
-                </>
-              )}
-              <p><strong>Meshes:</strong> {scene.meshes.length}</p>
-              <p><strong>Materials:</strong> {scene.materials.length}</p>
-            </div>
+            <p><strong>Format:</strong> {scene.metadata.format}</p>
+            <p><strong>Vertices:</strong> {scene.metadata.vertexCount}</p>
+            <p><strong>Faces:</strong> {scene.metadata.faceCount}</p>
+            {scene.metadata.boundingBox && (
+              <>
+                <p><strong>Bounding Box:</strong></p>
+                <p>
+                  Min: (
+                  {scene.metadata.boundingBox.min.x.toFixed(2)},{" "}
+                  {scene.metadata.boundingBox.min.y.toFixed(2)},{" "}
+                  {scene.metadata.boundingBox.min.z.toFixed(2)})
+                </p>
+                <p>
+                  Max: (
+                  {scene.metadata.boundingBox.max.x.toFixed(2)},{" "}
+                  {scene.metadata.boundingBox.max.y.toFixed(2)},{" "}
+                  {scene.metadata.boundingBox.max.z.toFixed(2)})
+                </p>
+              </>
+            )}
+
+            <p><strong>Meshes:</strong> {scene.meshes.length}</p>
+            <p><strong>Materials:</strong> {scene.materials.length}</p>
           </div>
         </div>
       </div>

@@ -567,23 +567,20 @@ const safeTextDecoder = {
   }
 };
 
-const safeArrayBufferDetection = (content: ArrayBuffer): Result<Scene, ParseError> => {
-  const maybeHeader = safeTextDecoder.decode(content, 1024);
-  if (!maybeHeader.ok) return Err(maybeHeader.error);
+const safeArrayBufferDetection = (content: ArrayBuffer): Result<Scene, ParseError> =>
+  pipe(
+    safeTextDecoder.decode(content, 1024),
+    andThen(headerText =>
+      headerText.includes("format binary_")
+        ? parseBinaryFromArrayBuffer(content)
+        : pipe(
+            safeTextDecoder.decode(content, content.byteLength),
+            andThen(parseASCII)
+          )
+    )
+  );
 
-  const headerText = maybeHeader.value;
 
-  // decide binary vs ascii
-  if (headerText.includes('format binary_')) {
-    return parseBinaryFromArrayBuffer(content);
-  }
-
-  // otherwise decode full file as text and parse ASCII
-  const maybeFullText = safeTextDecoder.decode(content, content.byteLength);
-  if (!maybeFullText.ok) return Err(maybeFullText.error);
-
-  return parseASCII(maybeFullText.value);
-};
 
 export const parsePLY = (content: string | ArrayBuffer): Result<Scene, ParseError> =>
   typeof content === 'string' 
