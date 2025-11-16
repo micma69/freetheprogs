@@ -567,18 +567,23 @@ const safeTextDecoder = {
   }
 };
 
-const safeArrayBufferDetection = (content: ArrayBuffer): Result<Scene, ParseError> =>
-  pipe(
-    safeTextDecoder.decode(content, 1024),
-    andThen(headerText =>
-      headerText.includes("format binary_")
-        ? parseBinaryFromArrayBuffer(content)
-        : pipe(
-            safeTextDecoder.decode(content, content.byteLength),
-            andThen(parseASCII)
-          )
-    )
-  );
+const safeArrayBufferDetection = (content: ArrayBuffer): Result<Scene, ParseError> => {
+  const maybeHeader = safeTextDecoder.decode(content, 1024);
+  if (!maybeHeader.ok) return Err(maybeHeader.error);
+
+  const headerText = maybeHeader.value;
+  if (typeof headerText !== 'string') {
+    return Err({ message: "Header decoding produced non-string", line: -1 });
+  }
+
+  if (headerText.toLowerCase().includes("format binary_")) {
+    return parseBinaryFromArrayBuffer(content);
+  }
+  
+  const maybeFull = safeTextDecoder.decode(content, content.byteLength);
+  return andThen(maybeFull, parseASCII);
+};
+
 
 
 
