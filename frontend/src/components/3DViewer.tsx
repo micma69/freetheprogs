@@ -311,104 +311,6 @@ const Viewer3D: React.FC<Viewer3DProps> = ({ scene }) => {
     };
   }, [scene]);
 
-const convertToPLY = async (): Promise<Result<void, string>> => {
-  if (!scene) {
-    return Err("No scene loaded");
-  }
-
-  onLoading(true);
-
-  const response = await fetch("http://localhost:3001/api/convert/ply", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(scene),
-  }).catch(() => null);
-
-  if (!response) {
-    onLoading(false);
-    return Err("Network error");
-  }
-
-  if (!response.ok) {
-    const text = await response.text().catch(() => "Unknown error");
-    onLoading(false);
-    return Err(text);
-  }
-
-  const blob = await response.blob().catch(() => null);
-
-  if (!blob) {
-    onLoading(false);
-    return Err("Could not read converted file");
-  }
-
-  // Side-effect isolated in one place
-  const downloadURL = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = downloadURL;
-  a.download = "converted.ply";
-  a.click();
-  URL.revokeObjectURL(downloadURL);
-
-  // Pure data update
-  onParsed({
-    ...scene,
-    metadata: { ...scene.metadata, format: "PLY" }
-  });
-
-  onLoading(false);
-  return Ok(undefined);
-};
-
-const convertToOBJ = async (): Promise<Result<void, string>> => {
-  if (!scene) {
-    return Err("No scene loaded");
-  }
-
-  onLoading(true);
-
-  const response = await fetch("http://localhost:3001/api/convert/obj", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(scene),
-  }).catch(() => null);
-
-  if (!response) {
-    onLoading(false);
-    return Err("Network error");
-  }
-
-  if (!response.ok) {
-    const text = await response.text().catch(() => "Unknown error");
-    onLoading(false);
-    return Err(text);
-  }
-
-  const blob = await response.blob().catch(() => null);
-
-  if (!blob) {
-    onLoading(false);
-    return Err("Could not read converted file");
-  }
-
-  // Side-effect isolated in one place
-  const downloadURL = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = downloadURL;
-  a.download = "converted.obj";
-  a.click();
-  URL.revokeObjectURL(downloadURL);
-
-  // Pure data update
-  onParsed({
-    ...scene,
-    metadata: { ...scene.metadata, format: "OBJ" }
-  });
-
-  onLoading(false);
-  return Ok(undefined);
-};
-
   return (
     <div className="viewer-3d">
       <h2>3D Viewer</h2>
@@ -423,9 +325,6 @@ const convertToOBJ = async (): Promise<Result<void, string>> => {
             <h3>Convert To</h3>
             <div className="convert-buttons">
               <button
-               onClick={convertToOBJ} //nanti ganti ke fungsi convert ke OBJ
-               className="convert-btn" 
-               disabled={scene?.metadata?.format === "OBJ"}
                 onClick={() => setTargetFormat("OBJ")}
                 className="convert-btn"
                 disabled={
@@ -506,7 +405,5 @@ const convertToOBJ = async (): Promise<Result<void, string>> => {
     </div>
   );
 };
-
-
 
 export default Viewer3D;
