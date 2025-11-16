@@ -6,7 +6,7 @@ import express, { Request, Response, NextFunction } from 'express';
 import cors from 'cors';  
 import multer from 'multer';
 import { parseOBJ } from '../../shared/parsers/obj';
-import type { ParseError as OBJParseError } from '../../shared/parsers/obj';
+import type { ParseError as OBJParseError, ParseError } from '../../shared/parsers/obj';
 import { parsePLY } from '../../shared/parsers/ply';
 import type { PLYParseError } from '../../shared/parsers/ply';
 import { parseGLTF } from '../../shared/parsers/gltf';
@@ -23,11 +23,11 @@ app.use(express.json());
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: {
-    fileSize: 50 * 1024 * 1024, // 50MB limit (GLTF files can be large)
+    fileSize: 50 * 1024 * 1024, //50mb limit for now
   },
   fileFilter: (_req, file, cb) => {
     // Accept common 3D file extensions
-    const allowedExtensions = ['.obj', '.ply', '.gltf', '.glb'];
+    const allowedExtensions = ['.obj', '.ply', '.gltf', '.glb','.bin'];
     const ext = file.originalname.toLowerCase().slice(file.originalname.lastIndexOf('.'));
     
     if (allowedExtensions.includes(ext)) {
@@ -152,6 +152,41 @@ app.post(
       success: false,
       error: { message: err instanceof Error ? err.message : 'Unknown error' },
     });
+  }
+});
+
+// Backend
+app.post('/api/parse/gltf', upload.fields([
+  { name: 'file', maxCount: 1 },
+  { name: 'additionalFiles', maxCount: 1 }
+]), async (req, res) => {
+  try {
+    if (!req.files || typeof req.files === 'object' && !('file' in req.files)) {
+      return res.status(400).json({ error: 'No GLTF file uploaded' });
+    }
+    
+    const gltfFile = (req.files as { [fieldname: string]: Express.Multer.File[] })['file'][0];
+    const additionalFiles = (req.files as { [fieldname: string]: Express.Multer.File[] })['additionalFiles'] || [];
+    
+    const gltfContent = gltfFile.buffer.toString('utf-8');
+    
+    // Create map of external buffers
+    const externalBuffers = new Map<string, ArrayBuffer>();
+    for (const file of additionalFiles) {
+      externalBuffers.set(file.originalname, file.buffer.buffer as ArrayBuffer);
+    }
+    
+    const result = parseGLTF(gltfContent, externalBuffers); //REcursion inside of parser not uploaded T_T
+    console.log('Parse complete:',result.ok);
+
+    if (result.ok) {
+      console.log('Attempting JSON serialization...');
+      return res.json({ success: true, data: result.value });
+    } else {
+      return res.json({ success: false, error: result.error });
+    }
+  } catch (error) {
+    return res.status(500).json({ success: false, error: { message: error instanceof Error ? error.message : 'Unknown error' } });
   }
 });
 

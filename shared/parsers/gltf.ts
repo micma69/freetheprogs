@@ -173,38 +173,51 @@ const decodeDataURI = (uri: string): Result<ArrayBuffer, GLTFParseError> => {
 };
 
 /**
- * Load buffer data
+ * Load buffer data - updated to handle external buffers
  */
 const loadBuffer = (
   buffer: GLTFBuffer,
-  index: number
+  index: number,
+  externalBuffers?: Map<string, ArrayBuffer>
 ): Result<ArrayBuffer, GLTFParseError> => {
   if (!buffer.uri) {
     return Err({ 
-      message: `Buffer ${index} has no URI (external buffers not supported in this implementation)` 
+      message: `Buffer ${index} has no URI` 
     });
   }
   
+  // Handle data URI (embedded)
   if (buffer.uri.startsWith('data:')) {
     return decodeDataURI(buffer.uri);
   }
   
+  // Handle external buffer
+  if (externalBuffers) {
+    const bufferData = externalBuffers.get(buffer.uri);
+    if (bufferData) {
+      return Ok(bufferData);
+    }
+  }
+  
   return Err({ 
-    message: `External buffer URIs not supported: ${buffer.uri}` 
+    message: `External buffer not provided: ${buffer.uri}` 
   });
 };
 
 /**
- * Load all buffers
+ * Load all buffers - updated signature
  */
 const loadBuffers = (
-  gltf: GLTFJson
+  gltf: GLTFJson,
+  externalBuffers?: Map<string, ArrayBuffer>
 ): Result<readonly ArrayBuffer[], GLTFParseError> => {
   if (!gltf.buffers || gltf.buffers.length === 0) {
     return Ok([]);
   }
   
-  const bufferResults = gltf.buffers.map((buffer, i) => loadBuffer(buffer, i));
+  const bufferResults = gltf.buffers.map((buffer, i) => 
+    loadBuffer(buffer, i, externalBuffers)
+  );
   return all(bufferResults);
 };
 
@@ -522,13 +535,16 @@ const buildScene = (
 };
 
 /**
- * Main GLTF parser using pure functional composition
+ * Main GLTF parser 
  */
-export const parseGLTF = (content: string): Result<Scene, GLTFParseError> => {
+export const parseGLTF = (
+  content: string, 
+  externalBuffers?: Map<string, ArrayBuffer>
+): Result<Scene, GLTFParseError> => {
   return pipe(
     parseJSON(content),
     (r: Result<GLTFJson, GLTFParseError>) => andThen(r, gltf => 
-      andThen(loadBuffers(gltf), buffers => Ok({ gltf, buffers }))
+      andThen(loadBuffers(gltf, externalBuffers), buffers => Ok({ gltf, buffers }))
     ),
     (r: Result<{ gltf: GLTFJson; buffers: readonly ArrayBuffer[] }, GLTFParseError>) => 
       andThen(r, ({ gltf, buffers }) => buildScene(gltf, buffers))
