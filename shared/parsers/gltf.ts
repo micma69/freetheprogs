@@ -21,6 +21,13 @@ export type GLTFParseError = {
   readonly path?: string;
 };
 
+// Node transformation type
+type NodeTransform = {
+  readonly matrix: readonly number[];
+  readonly nodeIndex: number;
+  readonly meshIndex: number;
+};
+
 // GLTF JSON Type Definitions
 type GLTFJson = {
   readonly asset: { readonly version: string };
@@ -128,6 +135,17 @@ const TypeSize: Record<string, number> = {
 };
 
 /**
+ * Normalize a vector
+ */
+const normalize = (v: { x: number; y: number; z: number }): Vec3 => {
+  const len = Math.sqrt(v.x * v.x + v.y * v.y + v.z * v.z);
+  if (len > 0.0001) {
+    return createVec3(v.x / len, v.y / len, v.z / len);
+  }
+  return createVec3(0, 1, 0); // default up
+};
+
+/**
  * Parse JSON content
  */
 const parseJSON = (content: string): Result<GLTFJson, GLTFParseError> => {
@@ -205,7 +223,7 @@ const loadBuffer = (
 };
 
 /**
- * Load all buffers - updated signature
+ * Load all buffers 
  */
 const loadBuffers = (
   gltf: GLTFJson,
@@ -419,41 +437,6 @@ const buildPrimitiveFaces = (
 };
 
 /**
- * Parse a GLTF mesh
- */
-const parseMesh = (
-  gltf: GLTFJson,
-  buffers: readonly ArrayBuffer[],
-  gltfMesh: GLTFMesh,
-  materials: readonly Material[]
-): Result<readonly { vertices: readonly Vertex[]; faces: readonly Face[] }[], GLTFParseError> => {
-  const primitiveResults = gltfMesh.primitives.map(primitive => {
-    const verticesResult = buildPrimitiveVertices(gltf, buffers, primitive);
-    if (!verticesResult.ok) {
-      return verticesResult;
-    }
-    
-    const material = primitive.material !== undefined 
-      ? materials[primitive.material] 
-      : undefined;
-    
-    const facesResult = buildPrimitiveFaces(
-      gltf, 
-      buffers, 
-      primitive, 
-      material?.name
-    );
-    if (!facesResult.ok) {
-      return facesResult;
-    }
-    
-    return Ok({ vertices: verticesResult.value, faces: facesResult.value });
-  });
-  
-  return all(primitiveResults);
-};
-
-/**
  * Calculate bounding box
  */
 const calculateBoundingBox = (
@@ -479,74 +462,330 @@ const calculateBoundingBox = (
 };
 
 /**
- * Build scene from GLTF data
+ * Basic 4x4 matrix helpers (minimal, self-contained)
  */
-const buildScene = (
+const createMat4 = (): readonly number[] => [
+  1,0,0,0,
+  0,1,0,0,
+  0,0,1,0,
+  0,0,0,1
+];
+
+const multiplyMat4 = (a: readonly number[], b: readonly number[]): readonly number[] => {
+  const out = new Array(16).fill(0);
+  for (let r = 0; r < 4; r++) {
+    for (let c = 0; c < 4; c++) {
+      let sum = 0;
+      for (let k = 0; k < 4; k++) {
+        sum += a[r * 4 + k] * b[k * 4 + c];
+      }
+      out[r * 4 + c] = sum;
+    }
+  }
+  return out;
+};
+
+const transformVec3 = (m: readonly number[], v: { x: number; y: number; z: number }): Vec3 => {
+  const x = v.x, y = v.y, z = v.z;
+  const w = m[3]*x + m[7]*y + m[11]*z + m[15];
+  const tx = (m[0]*x + m[4]*y + m[8]*z + m[12]) / w;
+  const ty = (m[1]*x + m[5]*y + m[9]*z + m[13]) / w;
+  const tz = (m[2]*x + m[6]*y + m[10]*z + m[14]) / w;
+  return createVec3(tx, ty, tz);
+};
+
+/**
+ * Transform a normal by the inverse-transpose of the 3x3 part of the matrix.
+ */
+const transformNormal = (m: readonly number[], n: { x: number; y: number; z: number }): Vec3 => {
+  // Build 3x3
+  const a00 = m[0], a01 = m[4], a02 = m[8];
+  const a10 = m[1], a11 = m[5], a12 = m[9];
+  const a20 = m[2], a21 = m[6], a22 = m[10];
+
+  // compute cofactors (adjugate) as proxy for inverse-transpose
+  const c00 =  a11 * a22 - a12 * a21;
+  const c01 = -(a10 * a22 - a12 * a20);
+  const c02 =  a10 * a21 - a11 * a20;
+  const c10 = -(a01 * a22 - a02 * a21);
+  const c11 =  a00 * a22 - a02 * a20;
+  const c12 = -(a00 * a21 - a01 * a20);
+  const c20 =  a01 * a12 - a02 * a11;
+  const c21 = -(a00 * a12 - a02 * a10);
+  const c22 =  a00 * a11 - a01 * a10;
+
+  const nx = c00 * n.x + c10 * n.y + c20 * n.z;
+  const ny = c01 * n.x + c11 * n.y + c21 * n.z;
+  const nz = c02 * n.x + c12 * n.y + c22 * n.z;
+
+  return normalize({ x: nx, y: ny, z: nz });
+};
+
+/**
+ * Convert quaternion to matrix
+ */
+const quaternionToMat4 = (quat: readonly number[]): readonly number[] => {
+  const [x, y, z, w] = quat;
+  const x2 = x + x, y2 = y + y, z2 = z + z;
+  const xx = x * x2, xy = x * y2, xz = x * z2;
+  const yy = y * y2, yz = y * z2, zz = z * z2;
+  const wx = w * x2, wy = w * y2, wz = w * z2;
+
+  return [
+    1 - (yy + zz), xy + wz, xz - wy, 0,
+    xy - wz, 1 - (xx + zz), yz + wx, 0,
+    xz + wy, yz - wx, 1 - (xx + yy), 0,
+    0, 0, 0, 1
+  ];
+};
+
+/**
+ * Get transformation matrix for a node
+ */
+const getNodeMatrix = (node: GLTFNode): readonly number[] => {
+  if (node.matrix) {
+    return [...node.matrix];
+  }
+
+  // Start with identity
+  let mat = createMat4();
+
+  // Apply translation
+  if (node.translation) {
+    const [tx, ty, tz] = node.translation;
+    const tMat = [
+      1, 0, 0, 0,
+      0, 1, 0, 0,
+      0, 0, 1, 0,
+      tx, ty, tz, 1
+    ];
+    mat = multiplyMat4(mat, tMat);
+  }
+
+  // Apply rotation (quaternion)
+  if (node.rotation) {
+    const rMat = quaternionToMat4(node.rotation);
+    mat = multiplyMat4(mat, rMat);
+  }
+
+  // Apply scale
+  if (node.scale) {
+    const [sx, sy, sz] = node.scale;
+    const sMat = [
+      sx, 0, 0, 0,
+      0, sy, 0, 0,
+      0, 0, sz, 0,
+      0, 0, 0, 1
+    ];
+    mat = multiplyMat4(mat, sMat);
+  }
+
+  return mat;
+};
+
+/**
+ * Recursively collect all node transformations that contain meshes
+ */
+const collectMeshNodes = (
+  gltf: GLTFJson,
+  nodeIndex: number,
+  parentMatrix: readonly number[],
+  collected: NodeTransform[]
+): void => {
+  const node = gltf.nodes?.[nodeIndex];
+  if (!node) return;
+
+  const nodeMatrix = getNodeMatrix(node);
+  const worldMatrix = multiplyMat4(parentMatrix, nodeMatrix);
+
+  if (node.mesh !== undefined) {
+    collected.push({ 
+      matrix: worldMatrix, 
+      nodeIndex,
+      meshIndex: node.mesh 
+    });
+  }
+
+  if (node.children) {
+    node.children.forEach(childIndex => {
+      collectMeshNodes(gltf, childIndex, worldMatrix, collected);
+    });
+  }
+};
+
+/**
+ * Find all mesh nodes in the scene
+ */
+const findMeshNodes = (
+  gltf: GLTFJson
+): Result<readonly NodeTransform[], GLTFParseError> => {
+  const sceneIndex = gltf.scene ?? 0;
+  const scene = gltf.scenes?.[sceneIndex];
+
+  if (!scene) {
+    return Err({ message: `Scene ${sceneIndex} not found` });
+  }
+
+  const meshNodes: NodeTransform[] = [];
+
+  if (scene.nodes) {
+    scene.nodes.forEach(nodeIndex => {
+      collectMeshNodes(gltf, nodeIndex, createMat4(), meshNodes);
+    });
+  }
+
+  return Ok(meshNodes);
+};
+
+/**
+ * Transform vertices and normals by node matrix
+ */
+const transformMeshData = (
+  vertices: readonly Vertex[],
+  matrix: readonly number[]
+): readonly Vertex[] => {
+  return vertices.map(vertex => {
+    const transformedPosition = transformVec3(matrix, vertex.position);
+    const transformedNormal = vertex.normal
+      ? transformNormal(matrix, vertex.normal)
+      : undefined;
+
+    return createVertex(
+      transformedPosition,
+      transformedNormal,
+      vertex.texCoord
+    );
+  });
+};
+
+/**
+ * Parse a GLTF mesh with node transformation
+ */
+const parseMeshWithTransformation = (
+  gltf: GLTFJson,
+  buffers: readonly ArrayBuffer[],
+  gltfMesh: GLTFMesh,
+  materials: readonly Material[],
+  transformMatrix: readonly number[]
+): Result<readonly { vertices: readonly Vertex[]; faces: readonly Face[] }[], GLTFParseError> => {
+  const primitiveResults = gltfMesh.primitives.map(primitive => {
+    const verticesResult = buildPrimitiveVertices(gltf, buffers, primitive);
+    if (!verticesResult.ok) {
+      return verticesResult;
+    }
+
+    const transformedVertices = transformMeshData(verticesResult.value, transformMatrix);
+
+    const material = primitive.material !== undefined
+      ? materials[primitive.material]
+      : undefined;
+
+    const facesResult = buildPrimitiveFaces(
+      gltf,
+      buffers,
+      primitive,
+      material?.name
+    );
+    if (!facesResult.ok) {
+      return facesResult;
+    }
+
+    return Ok({ vertices: transformedVertices, faces: facesResult.value });
+  });
+
+  return all(primitiveResults);
+};
+
+/**
+ * Build scene from GLTF data with proper node transformations
+ */
+const buildSceneWithNodes = (
   gltf: GLTFJson,
   buffers: readonly ArrayBuffer[]
 ): Result<Scene, GLTFParseError> => {
   const materials = parseMaterials(gltf);
-  
-  if (!gltf.meshes || gltf.meshes.length === 0) {
-    return Err({ message: 'No meshes found in GLTF' });
+
+  // Find all mesh nodes in the scene graph
+  const meshNodesResult = findMeshNodes(gltf);
+  if (!meshNodesResult.ok) {
+    return meshNodesResult;
   }
-  
-  // Parse all meshes
-  const meshResults = gltf.meshes.map((gltfMesh, i) => 
-    andThen(
-      parseMesh(gltf, buffers, gltfMesh, materials),
-      primitives => {
-        // Combine all primitives into single mesh
-        const allVertices = primitives.flatMap(p => [...p.vertices]);
-        const allFaces = primitives.flatMap(p => [...p.faces]);
-        
-        return Ok(
-          createMesh(
-            gltfMesh.name || `mesh_${i}`,
-            allVertices,
-            allFaces
-          )
-        );
-      }
-    )
-  );
-  
-  return andThen(
-    all(meshResults),
-    meshes => {
-      const allVertices = meshes.flatMap(m => [...m.vertices]);
-      const allFaces = meshes.flatMap(m => [...m.faces]);
-      const boundingBox = calculateBoundingBox(allVertices);
-      
-      const scene = createScene(
-        meshes,
-        materials,
-        {
-          format: 'GLTF',
-          vertexCount: allVertices.length,
-          faceCount: allFaces.length,
-          boundingBox,
-        }
-      );
-      
-      return Ok(scene);
+
+  const meshNodes = meshNodesResult.value;
+
+  if (meshNodes.length === 0) {
+    return Err({ message: 'No meshes found in GLTF scene' });
+  }
+
+  // Parse all meshes with their transformations
+  const meshResults = meshNodes.map(({ matrix, nodeIndex, meshIndex }) => {
+    const gltfMesh = gltf.meshes![meshIndex];
+
+    const parseResult = parseMeshWithTransformation(
+      gltf,
+      buffers,
+      gltfMesh,
+      materials,
+      matrix
+    );
+
+    if (!parseResult.ok) {
+      return parseResult;
+    }
+
+    const primitives = parseResult.value;
+    const allVertices = primitives.flatMap(p => p.vertices);
+    const allFaces = primitives.flatMap(p => p.faces);
+
+    return Ok(
+      createMesh(
+        gltfMesh.name || `mesh_${meshIndex}_node_${nodeIndex}`,
+        allVertices,
+        allFaces
+      )
+    );
+  });
+
+  const meshesResult = all(meshResults);
+  if (!meshesResult.ok) {
+    return meshesResult;
+  }
+
+  const meshes = meshesResult.value;
+
+  const allVertices = meshes.flatMap(m => m.vertices);
+  const allFaces = meshes.flatMap(m => m.faces);
+  const boundingBox = calculateBoundingBox(allVertices);
+
+  const scene = createScene(
+    meshes,
+    materials,
+    {
+      format: 'GLTF',
+      vertexCount: allVertices.length,
+      faceCount: allFaces.length,
+      boundingBox,
     }
   );
+
+  return Ok(scene);
 };
 
 /**
- * Main GLTF parser 
+ * Updated main GLTF parser with node support
  */
 export const parseGLTF = (
-  content: string, 
+  content: string,
   externalBuffers?: Map<string, ArrayBuffer>
 ): Result<Scene, GLTFParseError> => {
   return pipe(
     parseJSON(content),
-    (r: Result<GLTFJson, GLTFParseError>) => andThen(r, gltf => 
-      andThen(loadBuffers(gltf, externalBuffers), buffers => Ok({ gltf, buffers }))
+    (r) => andThen(r, gltf =>
+      andThen(
+        loadBuffers(gltf, externalBuffers),
+        buffers => Ok({ gltf, buffers })
+      )
     ),
-    (r: Result<{ gltf: GLTFJson; buffers: readonly ArrayBuffer[] }, GLTFParseError>) => 
-      andThen(r, ({ gltf, buffers }) => buildScene(gltf, buffers))
+    (r) => andThen(r, ({ gltf, buffers }) => buildSceneWithNodes(gltf, buffers))
   );
 };

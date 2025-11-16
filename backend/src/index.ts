@@ -176,7 +176,8 @@ app.post('/api/parse/gltf', upload.fields([
       externalBuffers.set(file.originalname, file.buffer.buffer as ArrayBuffer);
     }
     
-    const result = parseGLTF(gltfContent, externalBuffers); //REcursion inside of parser not uploaded T_T
+    console.log("Before Parsing")
+    const result = parseGLTF(gltfContent, externalBuffers); //REcursion inside of parser not uploaded.tsx T_T
     console.log('Parse complete:',result.ok);
 
     if (result.ok) {
