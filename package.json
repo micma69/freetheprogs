@@ -10,7 +10,15 @@
     "build:frontend": "cd frontend && npm run build",
     "test": "cd backend && npm test && cd ../frontend && npm test"
   },
-  "keywords": ["3d", "parser", "converter", "functional-programming"],
+  "keywords": [
+    "3d",
+    "parser",
+    "converter",
+    "functional-programming"
+  ],
   "author": "",
-  "license": "MIT"
+  "license": "MIT",
+  "devDependencies": {
+    "@types/node": "^24.10.1"
+  }
 }

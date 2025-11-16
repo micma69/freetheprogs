@@ -1,5 +1,5 @@
-/*import { parseOBJ } from '../shared/parsers/obj';
-import { convertToOBJ } from '../shared/converters';
+import { parseOBJ } from '../shared/parsers/obj';
+import { toOBJ } from '../shared/converters/obj';
 import { readFileSync } from 'fs';
 import { join } from 'path';
 import assert from 'assert';
@@ -27,7 +27,7 @@ if (!parseResult1.ok) {
   process.exit(1);
 }
 
-const convertResult = convertToOBJ(parseResult1.value);
+const convertResult = toOBJ(parseResult1.value);
 if (!convertResult.ok) {
   console.error('❌ Conversion to OBJ failed:', convertResult.error);
   process.exit(1);
@@ -74,7 +74,7 @@ for (const [i, testCase] of specialCases.entries()) {
     continue;
   }
   
-  const conv = convertToOBJ(p1.value);
+  const conv = toOBJ(p1.value);
   if (!conv.ok) {
     console.error(`❌ Conversion failed for case ${i + 1}:`, conv.error);
     continue;
@@ -96,4 +96,3 @@ for (const [i, testCase] of specialCases.entries()) {
 
 console.log('\n---\nAll tests completed!');
 
-*/
