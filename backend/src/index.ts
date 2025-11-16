@@ -7,14 +7,16 @@ import cors from 'cors';
 import multer from 'multer';
 import { parseOBJ } from '../../shared/parsers/obj'
 import type { ParseError } from '../../shared/parsers/obj';
-import { parsePLY } from '../../shared/parsers/ply'
+import { parsePLY } from '../../shared/parsers/ply';
+import { convertToPLY } from '../../shared/converters/ply';
+
 
 const app = express();
 const port = 3001;
 
 // Middleware
 app.use(cors());
-app.use(express.json());
+app.use(express.json({ limit: "50mb" }));
 
 // Configure multer for file uploads
 const upload = multer({
@@ -94,6 +96,37 @@ app.post('/api/parse/ply', upload.single('file'), (req: Request, res: Response) 
     });
   }
 });
+
+// Convert to OBJ endpoint
+app.post("/api/convert/obj", (req, res) => {
+
+});
+
+// Convert to PLY endpoint
+app.post("/api/convert/ply", (req, res) => {
+  const result = convertToPLY(req.body);
+
+  if (!result.ok) {
+    return res.status(400).json({ success: false, error: result.error });
+  }
+
+  const ply = result.value;
+
+  res.setHeader("Content-Type", "application/octet-stream");
+  res.setHeader("Content-Disposition", "attachment; filename=\"converted.ply\"");
+  return res.send(ply);
+});
+
+// Convert to glTF endpoint
+app.post("/api/convert/gltf", (req, res) => {
+
+});
+
+// Convert to STL endpoint
+app.post("/api/convert/stl", (req, res) => {
+
+});
+
 
 // Start server
 app.listen(port, () => {
