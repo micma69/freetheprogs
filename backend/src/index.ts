@@ -122,162 +122,40 @@ app.post(
       return res.status(400).json({ error: 'No file uploaded' });
     }
 
-    try {
-      const content = req.file.buffer.toString('utf-8');
-      const result = parsePLY(content);
-
-      if (result.ok) {
-        return res.json({
-          success: true,
-          format: 'PLY',
-          filename: req.file.originalname,
-          data: result.value,
-        });
-      } else {
-        const error = result.error as PLYParseError;
-        return res.status(400).json({
-          success: false,
-          format: 'PLY',
-          error: {
-            message: error.message,
-            line: error.line,
-            column: error.column,
-          },
-        });
-      }
-    } catch (err) {
-      return res.status(500).json({
-        success: false,
-        error: {
-          message: err instanceof Error ? err.message : 'Unknown error occurred',
-        },
-      });
-    }
-  }
-);
-
-// Parse GLTF file endpoint
-app.post(
-  '/api/parse/gltf', 
-  upload.single('file'), 
-  handleMulterError,
-  (req: Request, res: Response) => {
-    if (!req.file) {
-      return res.status(400).json({ error: 'No file uploaded' });
-    }
-
-    try {
-      const content = req.file.buffer.toString('utf-8');
-      const result = parseGLTF(content);
-
-      if (result.ok) {
-        return res.json({
-          success: true,
-          format: 'GLTF',
-          filename: req.file.originalname,
-          data: result.value,
-        });
-      } else {
-        const error = result.error as GLTFParseError;
-        return res.status(400).json({
-          success: false,
-          format: 'GLTF',
-          error: {
-            message: error.message,
-            path: error.path,
-          },
-        });
-      }
-    } catch (err) {
-      return res.status(500).json({
-        success: false,
-        error: {
-          message: err instanceof Error ? err.message : 'Unknown error occurred',
-        },
-      });
-    }
-  }
-);
-
-// Generic parse endpoint that detects format
-app.post(
-  '/api/parse', 
-  upload.single('file'), 
-  handleMulterError,
-  (req: Request, res: Response) => {
-    if (!req.file) {
-      return res.status(400).json({ error: 'No file uploaded' });
-    }
-
-    const ext = req.file.originalname.toLowerCase().slice(req.file.originalname.lastIndexOf('.'));
+  try {
+    const buffer = req.file.buffer;
     
-    try {
-      const content = req.file.buffer.toString('utf-8');
-      let result;
-      let format;
+    const content = buffer.buffer.slice(
+      buffer.byteOffset,
+      buffer.byteOffset + buffer.byteLength
+    );
+    
+    const result = parsePLY(content);
 
-      switch (ext) {
-        case '.obj':
-          result = parseOBJ(content);
-          format = 'OBJ';
-          break;
-        case '.ply':
-          result = parsePLY(content);
-          format = 'PLY';
-          break;
-        case '.gltf':
-        case '.glb':
-          result = parseGLTF(content);
-          format = 'GLTF';
-          break;
-        default:
-          return res.status(400).json({ 
-            error: `Unsupported file format: ${ext}` 
-          });
-      }
-
-      if (result.ok) {
-        return res.json({
-          success: true,
-          format,
-          filename: req.file.originalname,
-          data: result.value,
-        });
-      } else {
-        return res.status(400).json({
-          success: false,
-          format,
-          error: result.error,
-        });
-      }
-    } catch (err) {
-      return res.status(500).json({
+    if (result.ok) {
+      res.json({
+        success: true,
+        data: result.value,
+      });
+    } else {
+      const error = result.error as ParseError;
+      res.status(400).json({
         success: false,
         error: {
-          message: err instanceof Error ? err.message : 'Unknown error occurred',
+          message: error.message,
+          line: error.line,
         },
       });
     }
+  } catch (err) {
+    res.status(500).json({
+      success: false,
+      error: { message: err instanceof Error ? err.message : 'Unknown error' },
+    });
   }
-);
-
-// 404 handler
-app.use((_req: Request, res: Response) => {
-  res.status(404).json({ error: 'Endpoint not found' });
-});
-
-// Global error handler
-app.use((err: Error, _req: Request, res: Response, _next: NextFunction) => {
-  console.error('Unhandled error:', err);
-  res.status(500).json({ 
-    error: 'Internal server error',
-    message: process.env.NODE_ENV === 'development' ? err.message : undefined
-  });
 });
 
 // Start server
 app.listen(port, () => {
   console.log(`Server running on http://localhost:${port}`);
 });
-
-export default app;
