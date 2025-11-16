@@ -11,7 +11,7 @@ const Viewer3D: React.FC<Viewer3DProps> = ({ scene }) => {
   const glRef = useRef<WebGLRenderingContext | null>(null);
   const zoomRef = useRef(1.0);
   const rotationRef = useRef({ x: 0.5, y: 0.5 });
-  const [renderMode, setRenderMode] = React.useState<'normal' | 'wireframe'>('normal');
+  const [renderMode, setRenderMode] = React.useState<'wireframe' | 'normal'>('wireframe');
 
   // 14 predefined camera angles
   const predefinedViews = {
@@ -54,20 +54,24 @@ const Viewer3D: React.FC<Viewer3DProps> = ({ scene }) => {
     canvas.height = canvas.clientHeight;
     gl.viewport(0, 0, canvas.width, canvas.height);
 
-    // --- Enhanced Shaders with proper lighting ---
+    // --- CORRECTED Shaders with proper coordinate spaces ---
     const vertexShaderSource = `
       attribute vec3 a_position;
       attribute vec3 a_normal;
-      uniform mat4 u_matrix;
+      
+      uniform mat4 u_modelMatrix;
+      uniform mat4 u_viewMatrix;
+      uniform mat4 u_projectionMatrix;
       uniform mat4 u_normalMatrix;
+      
       varying vec3 v_normal;
       varying vec3 v_position;
+      
       void main() {
-        vec4 pos = u_matrix * vec4(a_position, 1.0);
-        gl_Position = pos;
-        v_position = pos.xyz;
-        
-        // Transform normal using normal matrix (inverse transpose of model-view)
+        vec4 worldPosition = u_modelMatrix * vec4(a_position, 1.0);
+        vec4 viewPosition = u_viewMatrix * worldPosition;
+        v_position = viewPosition.xyz;
+        gl_Position = u_projectionMatrix * viewPosition;
         v_normal = mat3(u_normalMatrix) * a_normal;
       }
     `;
@@ -79,27 +83,15 @@ const Viewer3D: React.FC<Viewer3DProps> = ({ scene }) => {
       
       void main() {
         vec3 normal = normalize(v_normal);
-        
-        // Light direction (from top-right-front)
         vec3 lightDir = normalize(vec3(1.0, 1.0, 1.0));
-        
-        // Camera direction (from fragment to camera - since we're in view space, camera is at 0,0,0)
         vec3 viewDir = normalize(-v_position);
         
-        // Ambient lighting
         float ambient = 0.3;
-        
-        // Diffuse lighting (Lambertian)
         float diffuse = max(dot(normal, lightDir), 0.0);
-        
-        // Specular lighting (Blinn-Phong)
         vec3 halfDir = normalize(lightDir + viewDir);
         float specular = pow(max(dot(normal, halfDir), 0.0), 32.0) * 0.4;
         
-        // Combined lighting
         float light = ambient + diffuse + specular;
-        
-        // Cool blue-gray color with lighting
         vec3 baseColor = vec3(0.75, 0.78, 0.82);
         gl_FragColor = vec4(baseColor * light, 1.0);
       }
@@ -107,9 +99,9 @@ const Viewer3D: React.FC<Viewer3DProps> = ({ scene }) => {
 
     const edgeVertexSource = `
       attribute vec3 a_position;
-      uniform mat4 u_matrix;
+      uniform mat4 u_modelViewProjectionMatrix;
       void main() {
-        gl_Position = u_matrix * vec4(a_position, 1.0);
+        gl_Position = u_modelViewProjectionMatrix * vec4(a_position, 1.0);
       }
     `;
 
@@ -154,20 +146,21 @@ const Viewer3D: React.FC<Viewer3DProps> = ({ scene }) => {
 
     const positionLoc = gl.getAttribLocation(triProgram, 'a_position');
     const normalLoc = gl.getAttribLocation(triProgram, 'a_normal');
-    const matrixLoc = gl.getUniformLocation(triProgram, 'u_matrix')!;
+    const modelMatrixLoc = gl.getUniformLocation(triProgram, 'u_modelMatrix')!;
+    const viewMatrixLoc = gl.getUniformLocation(triProgram, 'u_viewMatrix')!;
+    const projectionMatrixLoc = gl.getUniformLocation(triProgram, 'u_projectionMatrix')!;
     const normalMatrixLoc = gl.getUniformLocation(triProgram, 'u_normalMatrix')!;
 
     const edgePosLoc = gl.getAttribLocation(edgeProgram, 'a_position');
-    const edgeMatrixLoc = gl.getUniformLocation(edgeProgram, 'u_matrix')!;
+    const edgeMVP = gl.getUniformLocation(edgeProgram, 'u_modelViewProjectionMatrix')!;
     const edgeColorLoc = gl.getUniformLocation(edgeProgram, 'u_color')!;
 
-    // --- Vertex processing with normal validation ---
+    // --- Vertex processing ---
     const allVertices: Vertex[] = [];
     const allIndices: number[] = [];
     const edgeSet = new Set<string>();
     const edgeIndices: number[] = [];
 
-    // Check if we need to recalculate normals
     let hasValidNormals = true;
     for (const mesh of scene.meshes) {
       for (const vertex of mesh.vertices) {
@@ -180,7 +173,6 @@ const Viewer3D: React.FC<Viewer3DProps> = ({ scene }) => {
       if (!hasValidNormals) break;
     }
 
-    // Function to calculate face normal
     const calculateFaceNormal = (v1: Vertex, v2: Vertex, v3: Vertex) => {
       const p1 = v1.position;
       const p2 = v2.position;
@@ -196,20 +188,17 @@ const Viewer3D: React.FC<Viewer3DProps> = ({ scene }) => {
       };
     };
 
-    // Function to normalize vector
     const normalize = (v: { x: number; y: number; z: number }) => {
       const length = Math.sqrt(v.x * v.x + v.y * v.y + v.z * v.z);
       if (length > 0) {
         return { x: v.x / length, y: v.y / length, z: v.z / length };
       }
-      return { x: 0, y: 1, z: 0 }; // Default up normal
+      return { x: 0, y: 1, z: 0 };
     };
 
-    // Process meshes and calculate normals if needed
     if (!hasValidNormals) {
       console.log('Recalculating vertex normals...');
       
-      // First, collect all vertices and create face information
       const vertexNormals: { [key: number]: { x: number; y: number; z: number } } = {};
       const vertexFaces: { [key: number]: number } = {};
       
@@ -218,18 +207,15 @@ const Viewer3D: React.FC<Viewer3DProps> = ({ scene }) => {
         const vertexOffset = allVertices.length;
         allVertices.push(...mesh.vertices.map(v => ({ ...v })));
         
-        // Initialize normals
         for (let i = 0; i < mesh.vertices.length; i++) {
           const globalVertexIndex = vertexOffset + i;
           vertexNormals[globalVertexIndex] = { x: 0, y: 0, z: 0 };
           vertexFaces[globalVertexIndex] = 0;
         }
         
-        // Calculate face normals and accumulate to vertices
         for (const face of mesh.faces) {
           if (face.indices.length < 3) continue;
           
-          // Triangulate and calculate normals for each triangle
           for (let i = 1; i < face.indices.length - 1; i++) {
             const idx1 = face.indices[0] + vertexOffset;
             const idx2 = face.indices[i] + vertexOffset;
@@ -241,7 +227,6 @@ const Viewer3D: React.FC<Viewer3DProps> = ({ scene }) => {
             
             const faceNormal = calculateFaceNormal(v1, v2, v3);
             
-            // Accumulate face normal to each vertex
             [idx1, idx2, idx3].forEach(idx => {
               vertexNormals[idx].x += faceNormal.x;
               vertexNormals[idx].y += faceNormal.y;
@@ -256,20 +241,18 @@ const Viewer3D: React.FC<Viewer3DProps> = ({ scene }) => {
         globalIndex += mesh.vertices.length;
       }
       
-      // Average and normalize vertex normals
       for (let i = 0; i < allVertices.length; i++) {
         if (vertexFaces[i] > 0) {
           const normal = vertexNormals[i];
           normal.x /= vertexFaces[i];
           normal.y /= vertexFaces[i];
           normal.z /= vertexFaces[i];
-          allVertices[i].normal = normalize(normal);
+          allVertices[i] = { ...allVertices[i], normal: normalize(normal) };
         } else {
-          allVertices[i].normal = { x: 0, y: 1, z: 0 }; // Default up
+          allVertices[i] = { ...allVertices[i], normal: { x: 0, y: 1, z: 0 } };
         }
       }
       
-      // Build edge indices
       for (const mesh of scene.meshes) {
         const vertexOffset = allVertices.length - mesh.vertices.length;
         for (const face of mesh.faces) {
@@ -285,7 +268,6 @@ const Viewer3D: React.FC<Viewer3DProps> = ({ scene }) => {
         }
       }
     } else {
-      // Use existing normals
       for (const mesh of scene.meshes) {
         const vertexOffset = allVertices.length;
         allVertices.push(...mesh.vertices);
@@ -326,7 +308,6 @@ const Viewer3D: React.FC<Viewer3DProps> = ({ scene }) => {
       }
     }
 
-    // --- Create buffers ---
     const positionBuffer = gl.createBuffer()!;
     gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
     gl.bufferData(
@@ -355,7 +336,6 @@ const Viewer3D: React.FC<Viewer3DProps> = ({ scene }) => {
     gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, edgeIndexBuffer);
     gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, new IndexArrayType(edgeIndices), gl.STATIC_DRAW);
 
-    // --- Compute bounds ---
     const bounds = (() => {
       let minX = Infinity, minY = Infinity, minZ = Infinity;
       let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
@@ -382,47 +362,226 @@ const Viewer3D: React.FC<Viewer3DProps> = ({ scene }) => {
     const maxSize = Math.max(sizeX, sizeY, sizeZ);
     const baseScale = maxSize > 0 ? 2 / maxSize : 1;
 
-    const createMatrices = (angleX: number, angleY: number, zoom: number) => {
-      const cosX = Math.cos(angleX);
-      const sinX = Math.sin(angleX);
-      const cosY = Math.cos(angleY);
-      const sinY = Math.sin(angleY);
-      const s = baseScale * zoom;
-
-      // Model-view matrix
-      const modelView = new Float32Array([
-        cosY * s, sinX * sinY * s, -cosX * sinY * s, 0,
-        0, cosX * s, sinX * s, 0,
-        sinY * s, -sinX * cosY * s, cosX * cosY * s, 0,
-        -center.x * s, -center.y * s, -center.z * s, 1,
-      ]);
-
-      // Normal matrix (inverse transpose of the upper 3x3 of model-view)
-      // For rotation matrices, the inverse transpose is the same as the matrix itself
-      const normalMatrix = new Float32Array([
-        cosY, sinX * sinY, -cosX * sinY, 0,
-        0, cosX, sinX, 0,
-        sinY, -sinX * cosY, cosX * cosY, 0,
-        0, 0, 0, 1,
-      ]);
-
-      return { modelView, normalMatrix };
+    // Matrix utilities
+    const mat4 = {
+      create: (): Float32Array => new Float32Array(16),
+      
+      identity: (out: Float32Array): Float32Array => {
+        out.set([1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1]);
+        return out;
+      },
+      
+      perspective: (out: Float32Array, fov: number, aspect: number, near: number, far: number): Float32Array => {
+        const f = 1.0 / Math.tan(fov / 2);
+        const nf = 1 / (near - far);
+        out[0] = f / aspect;
+        out[1] = 0;
+        out[2] = 0;
+        out[3] = 0;
+        out[4] = 0;
+        out[5] = f;
+        out[6] = 0;
+        out[7] = 0;
+        out[8] = 0;
+        out[9] = 0;
+        out[10] = (far + near) * nf;
+        out[11] = -1;
+        out[12] = 0;
+        out[13] = 0;
+        out[14] = (2 * far * near) * nf;
+        out[15] = 0;
+        return out;
+      },
+      
+      lookAt: (out: Float32Array, eye: number[], center: number[], up: number[]): Float32Array => {
+        const [ex, ey, ez] = eye;
+        const [cx, cy, cz] = center;
+        const [ux, uy, uz] = up;
+        
+        const fx = cx - ex;
+        const fy = cy - ey;
+        const fz = cz - ez;
+        const flen = Math.sqrt(fx*fx + fy*fy + fz*fz);
+        const f = [fx/flen, fy/flen, fz/flen];
+        
+        const sx = f[1] * uz - f[2] * uy;
+        const sy = f[2] * ux - f[0] * uz;
+        const sz = f[0] * uy - f[1] * ux;
+        const slen = Math.sqrt(sx*sx + sy*sy + sz*sz);
+        const s = [sx/slen, sy/slen, sz/slen];
+        
+        const u = [
+          s[1] * f[2] - s[2] * f[1],
+          s[2] * f[0] - s[0] * f[2],
+          s[0] * f[1] - s[1] * f[0]
+        ];
+        
+        out[0] = s[0];
+        out[1] = u[0];
+        out[2] = -f[0];
+        out[3] = 0;
+        out[4] = s[1];
+        out[5] = u[1];
+        out[6] = -f[1];
+        out[7] = 0;
+        out[8] = s[2];
+        out[9] = u[2];
+        out[10] = -f[2];
+        out[11] = 0;
+        out[12] = -(s[0]*ex + s[1]*ey + s[2]*ez);
+        out[13] = -(u[0]*ex + u[1]*ey + u[2]*ez);
+        out[14] = f[0]*ex + f[1]*ey + f[2]*ez;
+        out[15] = 1;
+        
+        return out;
+      },
+      
+      multiply: (out: Float32Array, a: Float32Array, b: Float32Array): Float32Array => {
+        const a00 = a[0], a01 = a[1], a02 = a[2], a03 = a[3];
+        const a10 = a[4], a11 = a[5], a12 = a[6], a13 = a[7];
+        const a20 = a[8], a21 = a[9], a22 = a[10], a23 = a[11];
+        const a30 = a[12], a31 = a[13], a32 = a[14], a33 = a[15];
+        const b00 = b[0], b01 = b[1], b02 = b[2], b03 = b[3];
+        const b10 = b[4], b11 = b[5], b12 = b[6], b13 = b[7];
+        const b20 = b[8], b21 = b[9], b22 = b[10], b23 = b[11];
+        const b30 = b[12], b31 = b[13], b32 = b[14], b33 = b[15];
+        
+        out[0] = b00 * a00 + b01 * a10 + b02 * a20 + b03 * a30;
+        out[1] = b00 * a01 + b01 * a11 + b02 * a21 + b03 * a31;
+        out[2] = b00 * a02 + b01 * a12 + b02 * a22 + b03 * a32;
+        out[3] = b00 * a03 + b01 * a13 + b02 * a23 + b03 * a33;
+        out[4] = b10 * a00 + b11 * a10 + b12 * a20 + b13 * a30;
+        out[5] = b10 * a01 + b11 * a11 + b12 * a21 + b13 * a31;
+        out[6] = b10 * a02 + b11 * a12 + b12 * a22 + b13 * a32;
+        out[7] = b10 * a03 + b11 * a13 + b12 * a23 + b13 * a33;
+        out[8] = b20 * a00 + b21 * a10 + b22 * a20 + b23 * a30;
+        out[9] = b20 * a01 + b21 * a11 + b22 * a21 + b23 * a31;
+        out[10] = b20 * a02 + b21 * a12 + b22 * a22 + b23 * a32;
+        out[11] = b20 * a03 + b21 * a13 + b22 * a23 + b23 * a33;
+        out[12] = b30 * a00 + b31 * a10 + b32 * a20 + b33 * a30;
+        out[13] = b30 * a01 + b31 * a11 + b32 * a21 + b33 * a31;
+        out[14] = b30 * a02 + b31 * a12 + b32 * a22 + b33 * a32;
+        out[15] = b30 * a03 + b31 * a13 + b32 * a23 + b33 * a33;
+        
+        return out;
+      },
+      
+      translation: (out: Float32Array, x: number, y: number, z: number): Float32Array => {
+        out.set([1,0,0,0, 0,1,0,0, 0,0,1,0, x,y,z,1]);
+        return out;
+      },
+      
+      rotationX: (out: Float32Array, angle: number): Float32Array => {
+        const c = Math.cos(angle);
+        const s = Math.sin(angle);
+        out.set([1,0,0,0, 0,c,s,0, 0,-s,c,0, 0,0,0,1]);
+        return out;
+      },
+      
+      rotationY: (out: Float32Array, angle: number): Float32Array => {
+        const c = Math.cos(angle);
+        const s = Math.sin(angle);
+        out.set([c,0,-s,0, 0,1,0,0, s,0,c,0, 0,0,0,1]);
+        return out;
+      },
+      
+      scaling: (out: Float32Array, x: number, y: number, z: number): Float32Array => {
+        out.set([x,0,0,0, 0,y,0,0, 0,0,z,0, 0,0,0,1]);
+        return out;
+      },
+      
+      normalFromMat4: (out: Float32Array, a: Float32Array): Float32Array => {
+        const a00 = a[0], a01 = a[1], a02 = a[2];
+        const a10 = a[4], a11 = a[5], a12 = a[6];
+        const a20 = a[8], a21 = a[9], a22 = a[10];
+        
+        const det = a00 * (a11 * a22 - a12 * a21)
+                 - a01 * (a10 * a22 - a12 * a20)
+                 + a02 * (a10 * a21 - a11 * a20);
+        
+        if (det === 0) {
+          out.set([1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1]);
+          return out;
+        }
+        
+        const invDet = 1.0 / det;
+        
+        out[0] = (a11 * a22 - a12 * a21) * invDet;
+        out[1] = (a02 * a21 - a01 * a22) * invDet;
+        out[2] = (a01 * a12 - a02 * a11) * invDet;
+        out[3] = 0;
+        out[4] = (a12 * a20 - a10 * a22) * invDet;
+        out[5] = (a00 * a22 - a02 * a20) * invDet;
+        out[6] = (a02 * a10 - a00 * a12) * invDet;
+        out[7] = 0;
+        out[8] = (a10 * a21 - a11 * a20) * invDet;
+        out[9] = (a01 * a20 - a00 * a21) * invDet;
+        out[10] = (a00 * a11 - a01 * a10) * invDet;
+        out[11] = 0;
+        out[12] = 0;
+        out[13] = 0;
+        out[14] = 0;
+        out[15] = 1;
+        
+        return out;
+      }
     };
 
-    // --- Render function ---
+    const createMatrices = (angleX: number, angleY: number, zoom: number) => {
+      const aspect = canvas.width / canvas.height;
+      
+      const projection = mat4.create();
+      mat4.perspective(projection, Math.PI / 4, aspect, 0.1, 100.0);
+      
+      const view = mat4.create();
+      const cameraDistance = 5.0 / zoom;
+      const eye = [
+        cameraDistance * Math.sin(angleY) * Math.cos(angleX),
+        cameraDistance * Math.sin(angleX),
+        cameraDistance * Math.cos(angleY) * Math.cos(angleX)
+      ];
+      mat4.lookAt(view, eye, [0, 0, 0], [0, 1, 0]);
+      
+      const model = mat4.create();
+      const scale = baseScale * zoom;
+      mat4.translation(model, -center.x, -center.y, -center.z);
+      
+      const rotX = mat4.create();
+      const rotY = mat4.create();
+      const scaleM = mat4.create();
+      
+      mat4.rotationX(rotX, angleX);
+      mat4.rotationY(rotY, angleY);
+      mat4.scaling(scaleM, scale, scale, scale);
+      
+      const temp = mat4.create();
+      mat4.multiply(temp, scaleM, rotY);
+      mat4.multiply(temp, temp, rotX);
+      mat4.multiply(model, temp, model);
+      
+      const modelView = mat4.create();
+      mat4.multiply(modelView, view, model);
+      
+      const normalMatrix = mat4.create();
+      mat4.normalFromMat4(normalMatrix, modelView);
+      
+      const mvp = mat4.create();
+      mat4.multiply(mvp, projection, modelView);
+      
+      return { projection, view, model, modelView, normalMatrix, mvp };
+    };
+
     const render = () => {
-      // Light blue gradient background
       gl.clearColor(0.53, 0.81, 0.92, 1.0);
       gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
       gl.enable(gl.DEPTH_TEST);
       gl.enable(gl.CULL_FACE);
-      gl.cullFace(gl.BACK); // Only cull back faces
+      gl.cullFace(gl.BACK);
 
       const { x: angleX, y: angleY } = rotationRef.current;
-      const { modelView, normalMatrix } = createMatrices(angleX, angleY, zoomRef.current);
+      const matrices = createMatrices(angleX, angleY, zoomRef.current);
 
-      if (renderMode === 'normal') {
-        // Draw solid triangles with proper lighting
+      if (renderMode === 'wireframe') {
         gl.useProgram(triProgram);
         gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
         gl.vertexAttribPointer(positionLoc, 3, gl.FLOAT, false, 0, 0);
@@ -432,27 +591,28 @@ const Viewer3D: React.FC<Viewer3DProps> = ({ scene }) => {
         gl.vertexAttribPointer(normalLoc, 3, gl.FLOAT, false, 0, 0);
         gl.enableVertexAttribArray(normalLoc);
 
-        gl.uniformMatrix4fv(matrixLoc, false, modelView);
-        gl.uniformMatrix4fv(normalMatrixLoc, false, normalMatrix);
+        gl.uniformMatrix4fv(modelMatrixLoc, false, matrices.model);
+        gl.uniformMatrix4fv(viewMatrixLoc, false, matrices.view);
+        gl.uniformMatrix4fv(projectionMatrixLoc, false, matrices.projection);
+        gl.uniformMatrix4fv(normalMatrixLoc, false, matrices.normalMatrix);
+        
         gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, indexBuffer);
         gl.drawElements(gl.TRIANGLES, allIndices.length, indexType, 0);
 
       } else {
-        // Wireframe mode: draw edges with depth testing enabled
         gl.useProgram(edgeProgram);
         gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
         gl.vertexAttribPointer(edgePosLoc, 3, gl.FLOAT, false, 0, 0);
         gl.enableVertexAttribArray(edgePosLoc);
 
-        gl.uniformMatrix4fv(edgeMatrixLoc, false, modelView);
-        gl.uniform4fv(edgeColorLoc, new Float32Array([0.0, 0.0, 0.0, 1.0])); // Black edges
+        gl.uniformMatrix4fv(edgeMVP, false, matrices.mvp);
+        gl.uniform4fv(edgeColorLoc, new Float32Array([0.0, 0.0, 0.0, 1.0]));
 
         gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, edgeIndexBuffer);
         gl.drawElements(gl.LINES, edgeIndices.length, indexType, 0);
       }
     };
 
-    // --- Event handlers ---
     const handleResize = () => {
       canvas.width = canvas.clientWidth;
       canvas.height = canvas.clientHeight;
@@ -485,7 +645,6 @@ const Viewer3D: React.FC<Viewer3DProps> = ({ scene }) => {
     };
   }, [scene, renderMode]);
 
-  // View switching
   const setView = (viewName: keyof typeof predefinedViews) => {
     rotationRef.current = { ...predefinedViews[viewName] };
     render();
@@ -505,7 +664,6 @@ const Viewer3D: React.FC<Viewer3DProps> = ({ scene }) => {
     }
   };
 
-  // Updated control styles - top right, smaller, less opacity
   const gridStyle: React.CSSProperties = {
     position: 'absolute',
     right: 12,
@@ -518,7 +676,7 @@ const Viewer3D: React.FC<Viewer3DProps> = ({ scene }) => {
     gap: '3px',
     padding: '6px',
     borderRadius: '8px',
-    background: 'rgba(0,0,0,0.2)', // Less opacity
+    background: 'rgba(0,0,0,0.2)',
     pointerEvents: 'auto',
     zIndex: 10,
   };
@@ -527,11 +685,11 @@ const Viewer3D: React.FC<Viewer3DProps> = ({ scene }) => {
     width: '100%',
     height: '100%',
     borderRadius: '4px',
-    background: 'rgba(255,255,255,0.8)', // Less opacity
+    background: 'rgba(255,255,255,0.8)',
     border: 'none',
     cursor: 'pointer',
     boxShadow: '0 1px 3px rgba(0,0,0,0.2)',
-    fontSize: '10px', // Smaller font
+    fontSize: '10px',
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
@@ -542,14 +700,14 @@ const Viewer3D: React.FC<Viewer3DProps> = ({ scene }) => {
 
   const resetBtnStyle: React.CSSProperties = {
     ...gridBtnStyle,
-    background: 'rgba(59,130,246,0.7)', // Less opacity
+    background: 'rgba(59,130,246,0.7)',
     color: 'white',
   };
 
   const viewControlsStyle: React.CSSProperties = {
     position: 'absolute',
     top: 12,
-    right: 120, // Moved to top right, next to grid
+    right: 120,
     display: 'flex',
     flexDirection: 'column',
     gap: '6px',
@@ -557,12 +715,12 @@ const Viewer3D: React.FC<Viewer3DProps> = ({ scene }) => {
   };
 
   const viewBtnStyle: React.CSSProperties = {
-    background: 'rgba(255,255,255,0.8)', // Less opacity
+    background: 'rgba(255,255,255,0.8)',
     border: '1px solid rgba(0,0,0,0.1)',
     borderRadius: '4px',
-    padding: '6px 10px', // Smaller
+    padding: '6px 10px',
     cursor: 'pointer',
-    fontSize: '11px', // Smaller
+    fontSize: '11px',
     fontWeight: 500,
     boxShadow: '0 1px 3px rgba(0,0,0,0.2)',
     transition: 'all 0.2s',
@@ -570,7 +728,7 @@ const Viewer3D: React.FC<Viewer3DProps> = ({ scene }) => {
 
   const renderModeBtnStyle: React.CSSProperties = {
     ...viewBtnStyle,
-    background: renderMode === 'normal' ? 'rgba(59,130,246,0.7)' : 'rgba(107,114,128,0.7)',
+    background: renderMode === 'wireframe' ? 'rgba(59,130,246,0.7)' : 'rgba(107,114,128,0.7)',
     color: 'white',
     marginBottom: '4px',
   };
@@ -582,33 +740,24 @@ const Viewer3D: React.FC<Viewer3DProps> = ({ scene }) => {
         <div className="viewer-left" style={{ position: 'relative' }}>
           <canvas ref={canvasRef} className="viewer-canvas" style={{ width: '100%', height: '480px', display: 'block' }} />
           
-          {/* All controls moved to top right */}
           <div style={viewControlsStyle}>
             <button 
               style={renderModeBtnStyle}
               onClick={() => setRenderMode(m => m === 'normal' ? 'wireframe' : 'normal')}
             >
-              {renderMode === 'normal' ? 'Wireframe' : 'Normal'}
+              {renderMode === 'wireframe' ? 'normal' : 'wireframe'}
             </button>
-            <button style={viewBtnStyle} onClick={() => setView('front')} title="Front">Front</button>
-            <button style={viewBtnStyle} onClick={() => setView('back')} title="Back">Back</button>
-            <button style={viewBtnStyle} onClick={() => setView('top')} title="Top">Top</button>
-            <button style={viewBtnStyle} onClick={() => setView('bottom')} title="Bottom">Bottom</button>
           </div>
 
-          {/* 3x3 View Grid - smaller and less opaque */}
           <div style={gridStyle}>
-            {/* Top Row */}
             <button style={gridBtnStyle} onClick={() => setView('top-back-left')} title="Top Back Left">TBL</button>
             <button style={gridBtnStyle} onClick={() => setView('top')} title="Top">T</button>
             <button style={gridBtnStyle} onClick={() => setView('top-back-right')} title="Top Back Right">TBR</button>
             
-            {/* Middle Row */}
             <button style={gridBtnStyle} onClick={() => setView('left')} title="Left">L</button>
             <button style={resetBtnStyle} onClick={resetCamera} title="Reset">●</button>
             <button style={gridBtnStyle} onClick={() => setView('right')} title="Right">R</button>
             
-            {/* Bottom Row */}
             <button style={gridBtnStyle} onClick={() => setView('top-front-left')} title="Top Front Left">TFL</button>
             <button style={gridBtnStyle} onClick={() => setView('front')} title="Front">F</button>
             <button style={gridBtnStyle} onClick={() => setView('top-front-right')} title="Top Front Right">TFR</button>
