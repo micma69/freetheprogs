@@ -1,72 +1,67 @@
-import { Ok, Err, type Result } from "../utils/result";
-import type { Scene } from "../types/scene";
+import type { Scene, Mesh, Vertex, Face } from "../types/scene";
+import { type Result, Ok, Err, pipe, mapArray, flatMapArray } from "../utils/result";
 
-export const convertSceneToPLY = (scene: Scene): Result<string, string> => {
-  // --- Validate scene ----------------------------------------------------
+export type ConvertError = { readonly message: string };
 
-  if (!scene.meshes || scene.meshes.length === 0) {
-    return Err("Scene contains no meshes");
-  }
+const formatVertex = (v: Vertex): string =>
+  [
+    v.position.x,
+    v.position.y,
+    v.position.z,
+    v.normal?.x ?? 0,
+    v.normal?.y ?? 0,
+    v.normal?.z ?? 0,
+    v.texCoord?.x ?? 0,
+    v.texCoord?.y ?? 0,
+  ].join(" ");
 
-  const mesh = scene.meshes[0];
+const formatFace = (f: Face): string =>
+  `${f.indices.length} ${f.indices.join(" ")}`;
 
-  if (!mesh.vertices || mesh.vertices.length === 0) {
-    return Err("Mesh contains no vertices");
-  }
-
-  if (!mesh.faces || mesh.faces.length === 0) {
-    return Err("Mesh contains no faces");
-  }
-
-  const vertices = mesh.vertices;
-  const faces = mesh.faces;
-
-  // --- Build header -------------------------------------------------------
-
-  const header =
-    [
-      "ply",
-      "format ascii 1.0",
-      `element vertex ${vertices.length}`,
-      "property float x",
-      "property float y",
-      "property float z",
-      "property float nx",
-      "property float ny",
-      "property float nz",
-      `element face ${faces.length}`,
-      "property list uchar int vertex_indices",
-      "end_header",
-    ].join("\n") + "\n";
-
-  // --- Build vertex section (pure mapping) -------------------------------
-
-  const vertexLines = vertices
-    .map((v) => {
-      const nx = v.normal?.x ?? 0;
-      const ny = v.normal?.y ?? 0;
-      const nz = v.normal?.z ?? 0;
-
-      return [
-        v.position.x,
-        v.position.y,
-        v.position.z,
-        nx,
-        ny,
-        nz,
-      ].join(" ");
-    })
-    .join("\n");
-
-  // --- Build face section -------------------------------------------------
-
-  const faceLines = faces
-    .map((f) => `${f.indices.length} ${f.indices.join(" ")}`)
-    .join("\n");
-
-  // --- Combine result (still pure) ---------------------------------------
-
-  const ply = `${header}${vertexLines}\n${faceLines}\n`;
-
-  return Ok(ply);
-};
+export const convertToPLY = (scene: Scene): Result<string, ConvertError> =>
+  pipe(
+    scene.meshes,
+    // flatten all meshes → vertices & faces
+    meshes =>
+      meshes.length === 0
+        ? Err({ message: "Scene contains no meshes" })
+        : Ok(meshes),
+    flatMapResult => flatMapResult.ok
+      ? Ok({
+          vertices: flatMapArray((m: Mesh) => m.vertices)(flatMapResult.value),
+          faces: flatMapArray((m: Mesh) => m.faces)(flatMapResult.value),
+        })
+      : flatMapResult,
+    result =>
+      result.ok
+        ? Ok(
+            pipe(
+              [
+                "ply",
+                "format ascii 1.0",
+                `element vertex ${result.value.vertices.length}`,
+                "property float x",
+                "property float y",
+                "property float z",
+                "property float nx",
+                "property float ny",
+                "property float nz",
+                "property float s",
+                "property float t",
+                `element face ${result.value.faces.length}`,
+                "property list uchar int vertex_indices",
+                "end_header",
+              ],
+              header =>
+                header
+                  .concat(
+                    mapArray(formatVertex)(result.value.vertices)
+                  )
+                  .concat(
+                    mapArray(formatFace)(result.value.faces)
+                  )
+                  .join("\n")
+            )
+          )
+        : result
+  );
