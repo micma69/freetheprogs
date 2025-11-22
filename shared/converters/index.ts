@@ -39,18 +39,18 @@ export const convertToSTL = (_scene: Scene): Result<string, ConvertError> => {
   };
 };
 
-/**
- * Convert Scene to PLY format string
- */
-export const convertToPLY = (_scene: Scene): Result<string, ConvertError> => {
-  // TODO: Implement PLY exporter
-  return {
-    ok: false,
-    error: {
-      message: 'PLY converter not yet implemented',
-    },
-  };
-};
+// /**
+//  * Convert Scene to PLY format string
+//  */
+// export const convertToPLY = (_scene: Scene): Result<string, ConvertError> => {
+//   // TODO: Implement PLY exporter
+//   return {
+//     ok: false,
+//     error: {
+//       message: 'PLY converter not yet implemented',
+//     },
+//   };
+// };
 
 /**
  * Convert Scene to glTF format (JSON or binary)

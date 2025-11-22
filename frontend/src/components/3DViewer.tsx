@@ -736,6 +736,7 @@ const Viewer3D: React.FC<Viewer3DProps> = ({ scene }) => {
   return (
     <div className="viewer-3d">
       <h2>3D Viewer</h2>
+
       <div className="viewer-layout">
         <div className="viewer-left" style={{ position: 'relative' }}>
           <canvas ref={canvasRef} className="viewer-canvas" style={{ width: '100%', height: '480px', display: 'block' }} />
@@ -768,28 +769,81 @@ const Viewer3D: React.FC<Viewer3DProps> = ({ scene }) => {
           <div className="viewer-convert">
             <h3>Convert To</h3>
             <div className="convert-buttons">
-              <button className="convert-btn" disabled>A</button>
-              <button className="convert-btn" disabled>B</button>
-              <button className="convert-btn" disabled>C</button>
-              <button className="convert-btn" disabled>D</button>
+              <button
+                onClick={() => setTargetFormat("OBJ")}
+                className="convert-btn"
+                disabled={
+                  scene.metadata.format === "OBJ" || targetFormat === "OBJ"
+                }
+              >
+                OBJ
+              </button>
+              <button
+                onClick={() => setTargetFormat("PLY")}
+                className="convert-btn"
+                disabled={
+                  scene.metadata.format === "PLY" || targetFormat === "PLY"
+                }
+              >
+                PLY
+              </button>
+              <button
+                onClick={() => setTargetFormat("glTF")}
+                className="convert-btn"
+                disabled={
+                  scene.metadata.format === "glTF" || targetFormat === "glTF"
+                }
+              >
+                GLTF
+              </button>
+
+              <button
+                onClick={() => setTargetFormat("STL")}
+                className="convert-btn"
+                disabled={
+                  scene.metadata.format === "STL" || targetFormat === "STL"
+                }
+              >
+                STL
+              </button>
             </div>
+            <button
+              className="download-btn"
+              disabled={!targetFormat}
+              onClick={async () => {
+                const res = await performConversion();
+                if (res.ok) downloadConvertedFile();
+              }}
+            >
+              Download Converted File
+            </button>
           </div>
+
           <div className="viewer-meta">
             <h3>Object Metadata</h3>
-            <div className="viewer-stats">
-              <p><strong>Format:</strong> {scene.metadata.format}</p>
-              <p><strong>Vertices:</strong> {scene.metadata.vertexCount}</p>
-              <p><strong>Faces:</strong> {scene.metadata.faceCount}</p>
-              {scene.metadata.boundingBox && (
-                <>
-                  <p><strong>Bounding Box:</strong></p>
-                  <p>Min: ({scene.metadata.boundingBox.min.x.toFixed(2)}, {scene.metadata.boundingBox.min.y.toFixed(2)}, {scene.metadata.boundingBox.min.z.toFixed(2)})</p>
-                  <p>Max: ({scene.metadata.boundingBox.max.x.toFixed(2)}, {scene.metadata.boundingBox.max.y.toFixed(2)}, {scene.metadata.boundingBox.max.z.toFixed(2)})</p>
-                </>
-              )}
-              <p><strong>Meshes:</strong> {scene.meshes.length}</p>
-              <p><strong>Materials:</strong> {scene.materials.length}</p>
-            </div>
+            <p><strong>Format:</strong> {scene.metadata.format}</p>
+            <p><strong>Vertices:</strong> {scene.metadata.vertexCount}</p>
+            <p><strong>Faces:</strong> {scene.metadata.faceCount}</p>
+            {scene.metadata.boundingBox && (
+              <>
+                <p><strong>Bounding Box:</strong></p>
+                <p>
+                  Min: (
+                  {scene.metadata.boundingBox.min.x.toFixed(2)},{" "}
+                  {scene.metadata.boundingBox.min.y.toFixed(2)},{" "}
+                  {scene.metadata.boundingBox.min.z.toFixed(2)})
+                </p>
+                <p>
+                  Max: (
+                  {scene.metadata.boundingBox.max.x.toFixed(2)},{" "}
+                  {scene.metadata.boundingBox.max.y.toFixed(2)},{" "}
+                  {scene.metadata.boundingBox.max.z.toFixed(2)})
+                </p>
+              </>
+            )}
+
+            <p><strong>Meshes:</strong> {scene.meshes.length}</p>
+            <p><strong>Materials:</strong> {scene.materials.length}</p>
           </div>
         </div>
       </div>
