@@ -2,17 +2,18 @@
  * Express backend server for 3D format parser and converter
  */
 
-import express, { Request, Response } from 'express';
-import cors from 'cors';
+import express, { Request, Response, NextFunction } from 'express';
+import cors from 'cors';  
 import multer from 'multer';
-import { parseOBJ } from '../../shared/parsers/obj'
-import type { ParseError } from '../../shared/parsers/obj';
+import { parseOBJ } from '../../shared/parsers/obj';
+import type { ParseError as OBJParseError, ParseError } from '../../shared/parsers/obj';
 import { parsePLY } from '../../shared/parsers/ply';
-import { convertToPLY } from '../../shared/converters/ply';
-
+import type { PLYParseError } from '../../shared/parsers/ply';
+import { parseGLTF } from '../../shared/parsers/gltf';
+import type { GLTFParseError } from '../../shared/parsers/gltf';
 
 const app = express();
-const port = 3001;
+const port = process.env.PORT || 3001;
 
 // Middleware
 app.use(cors());
@@ -22,47 +23,104 @@ app.use(express.json({ limit: "50mb" }));
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: {
-    fileSize: 10 * 1024 * 1024, // 10MB limit
+    fileSize: 50 * 1024 * 1024, //50mb limit for now
+  },
+  fileFilter: (_req, file, cb) => {
+    // Accept common 3D file extensions
+    const allowedExtensions = ['.obj', '.ply', '.gltf', '.glb','.bin'];
+    const ext = file.originalname.toLowerCase().slice(file.originalname.lastIndexOf('.'));
+    
+    if (allowedExtensions.includes(ext)) {
+      cb(null, true);
+    } else {
+      cb(new Error(`Invalid file type. Allowed: ${allowedExtensions.join(', ')}`));
+    }
   },
 });
 
+// Error handling middleware
+const handleMulterError = (
+  err: any,
+  _req: Request,
+  res: Response,
+  next: NextFunction
+) => {
+  if (err instanceof multer.MulterError) {
+    if (err.code === 'LIMIT_FILE_SIZE') {
+      return res.status(413).json({ 
+        error: 'File too large. Maximum size is 50MB' 
+      });
+    }
+    return res.status(400).json({ error: err.message });
+  } else if (err) {
+    return res.status(400).json({ error: err.message });
+  }
+  next();
+};
+
 // Health check endpoint
 app.get('/api/health', (_req: Request, res: Response) => {
-  res.json({ status: 'ok', message: '3D Parser API is running' });
+  res.json({ 
+    status: 'ok', 
+    message: '3D Parser API is running',
+    supportedFormats: ['obj', 'ply', 'gltf'],
+    version: '1.0.0'
+  });
 });
 
 // Parse OBJ file endpoint
-app.post('/api/parse/obj', upload.single('file'), (req: Request, res: Response) => {
-  if (!req.file) {
-    return res.status(400).json({ error: 'No file uploaded' });
-  }
+app.post(
+  '/api/parse/obj', 
+  upload.single('file'), 
+  handleMulterError,
+  (req: Request, res: Response) => {
+    if (!req.file) {
+      return res.status(400).json({ error: 'No file uploaded' });
+    }
 
-  const content = req.file.buffer.toString('utf-8');
-  const result = parseOBJ(content);
+    try {
+      const content = req.file.buffer.toString('utf-8');
+      const result = parseOBJ(content);
 
-  if (result.ok) {
-    res.json({
-      success: true,
-      data: result.value,
-    });
-  } else {
-    const error = result.error as ParseError;
-    res.status(400).json({
-      success: false,
-      error: {
-        message: error.message,
-        line: error.line,
-        column: error.column,
-      },
-    });
+      if (result.ok) {
+        return res.json({
+          success: true,
+          format: 'OBJ',
+          filename: req.file.originalname,
+          data: result.value,
+        });
+      } else {
+        const error = result.error as OBJParseError;
+        return res.status(400).json({
+          success: false,
+          format: 'OBJ',
+          error: {
+            message: error.message,
+            line: error.line,
+            column: error.column,
+          },
+        });
+      }
+    } catch (err) {
+      return res.status(500).json({
+        success: false,
+        error: {
+          message: err instanceof Error ? err.message : 'Unknown error occurred',
+        },
+      });
+    }
   }
-});
+);
 
 // Parse PLY file endpoint
-app.post('/api/parse/ply', upload.single('file'), (req: Request, res: Response) => {
-  if (!req.file) {
-    return res.status(400).json({ error: 'No file uploaded' });
-  }
+app.post(
+  '/api/parse/ply', 
+  upload.single('file'), 
+  handleMulterError,
+  (req: Request, res: Response) => {
+    if (!req.file) {
+      return res.status(400).json({ error: 'No file uploaded' });
+    }
 
   try {
     const buffer = req.file.buffer;
@@ -97,38 +155,43 @@ app.post('/api/parse/ply', upload.single('file'), (req: Request, res: Response) 
   }
 });
 
-// Convert to OBJ endpoint
-app.post("/api/convert/obj", (req, res) => {
+// Backend
+app.post('/api/parse/gltf', upload.fields([
+  { name: 'file', maxCount: 1 },
+  { name: 'additionalFiles', maxCount: 1 }
+]), async (req, res) => {
+  try {
+    if (!req.files || typeof req.files === 'object' && !('file' in req.files)) {
+      return res.status(400).json({ error: 'No GLTF file uploaded' });
+    }
+    
+    const gltfFile = (req.files as { [fieldname: string]: Express.Multer.File[] })['file'][0];
+    const additionalFiles = (req.files as { [fieldname: string]: Express.Multer.File[] })['additionalFiles'] || [];
+    
+    const gltfContent = gltfFile.buffer.toString('utf-8');
+    
+    // Create map of external buffers
+    const externalBuffers = new Map<string, ArrayBuffer>();
+    for (const file of additionalFiles) {
+      externalBuffers.set(file.originalname, file.buffer.buffer as ArrayBuffer);
+    }
+    
+    console.log("Before Parsing")
+    const result = parseGLTF(gltfContent, externalBuffers); //REcursion inside of parser not uploaded.tsx T_T
+    console.log('Parse complete:',result.ok);
 
-});
-
-// Convert to PLY endpoint
-app.post("/api/convert/ply", (req, res) => {
-  const result = convertToPLY(req.body);
-
-  if (!result.ok) {
-    return res.status(400).json({ success: false, error: result.error });
+    if (result.ok) {
+      console.log('Attempting JSON serialization...');
+      return res.json({ success: true, data: result.value });
+    } else {
+      return res.json({ success: false, error: result.error });
+    }
+  } catch (error) {
+    return res.status(500).json({ success: false, error: { message: error instanceof Error ? error.message : 'Unknown error' } });
   }
-
-  const ply = result.value;
-
-  res.setHeader("Content-Type", "application/octet-stream");
-  res.setHeader("Content-Disposition", "attachment; filename=\"converted.ply\"");
-  return res.send(ply);
 });
-
-// Convert to glTF endpoint
-app.post("/api/convert/gltf", (req, res) => {
-
-});
-
-// Convert to STL endpoint
-app.post("/api/convert/stl", (req, res) => {
-
-});
-
 
 // Start server
 app.listen(port, () => {
-  console.log(`Server is running on http://localhost:${port}`);
+  console.log(`Server running on http://localhost:${port}`);
 });

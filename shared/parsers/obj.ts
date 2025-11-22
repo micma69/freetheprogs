@@ -439,6 +439,7 @@ export const parseOBJ = (content: string): Result<Scene, ParseError> => {
 
 
 // Obj parse with pipe
+
 export const parseOBJWithPipe = (content: string): Result<Scene, ParseError> => {
   return pipe(
     parseLines(content),

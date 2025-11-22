@@ -120,11 +120,11 @@ export const all = <T, E>(results: Result<T, E>[]): Result<T[], E> => {
 };
 
 
-export const pipe = <T>(
-  value: T,
-  ...fns: Array<(arg: any) => any>
-): any => {
-  return fns.reduce((acc, fn) => fn(acc), value);
+export const pipe = <T, E>(
+  initial: Result<T, E>,
+  ...fns: Array<(result: Result<any, E>) => Result<any, E>>
+): Result<any, E> => {
+  return fns.reduce((acc, fn) => fn(acc), initial);
 };
 
 /**
