@@ -83,7 +83,9 @@ const FileUpload: React.FC<FileUploadProps> = ({
         endpoint = 'http://localhost:3001/api/parse/ply';
       } else if (fileType === 'gltf' || fileType === 'glb') {
         endpoint = 'http://localhost:3001/api/parse/gltf';
-      } else {
+      } else if (fileType === 'stl' || fileType === 'stl') {
+        endpoint = 'http://localhost:3001/api/parse/stl';
+      }else {
         throw new Error(`Unsupported file format: ${fileType}`);
       }
 
