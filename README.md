@@ -1,6 +1,8 @@
 # 3D Format Parser and Converter
 
 A web application for viewing and converting 3D file formats using functional programming principles.
+Ini adalah aplikasi berbasis web, yang fungsinya buat mengubah file-file 3D ke jenis file 3D lainnya
+(misal, dari .obj ke .ply)
 
 ## Features
 - Parse and validate 3D files (OBJ, STL, PLY, GLTF)

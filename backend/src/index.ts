@@ -27,7 +27,7 @@ const upload = multer({
   },
   fileFilter: (_req, file, cb) => {
     // Accept common 3D file extensions
-    const allowedExtensions = ['.obj', '.ply', '.gltf', '.glb','.bin'];
+    const allowedExtensions = ['.obj', '.ply', '.gltf', '.glb','.bin', '.stl'];
     const ext = file.originalname.toLowerCase().slice(file.originalname.lastIndexOf('.'));
     
     if (allowedExtensions.includes(ext)) {
@@ -63,7 +63,7 @@ app.get('/api/health', (_req: Request, res: Response) => {
   res.json({ 
     status: 'ok', 
     message: '3D Parser API is running',
-    supportedFormats: ['obj', 'ply', 'gltf'],
+    supportedFormats: ['obj', 'ply', 'gltf', 'stl'],
     version: '1.0.0'
   });
 });

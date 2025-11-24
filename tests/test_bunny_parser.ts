@@ -1,4 +1,4 @@
-import { parseOBJ } from './shared/parsers/obj';
+import { parseOBJ } from '../shared/parsers/obj';
 import { readFileSync } from 'fs';
 import { join } from 'path';
 
