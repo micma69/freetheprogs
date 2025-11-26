@@ -182,7 +182,7 @@ const Viewer3D: React.FC<Viewer3DProps> = ({ scene }) => {
     const wireframeFragmentSource = `
       precision mediump float;
       void main() {
-        gl_FragColor = vec4(0.2, 0.5, 0.9, 1.0);
+        gl_FragColor = vec4(1, 0.027, 0.067,1.0);
       }
     `;
     const edgeVertexSource = `
@@ -325,7 +325,6 @@ const Viewer3D: React.FC<Viewer3DProps> = ({ scene }) => {
     const baseScale = 2 / maxSize;
 
     // small matrix helpers (column-major for WebGL)
-    const mat4_identity = () => new Float32Array([1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1]);
     const mat4_mul = (a: Float32Array, b: Float32Array) => {
       const out = new Float32Array(16);
       for (let r = 0; r < 4; r++) for (let c = 0; c < 4; c++) {
@@ -337,8 +336,6 @@ const Viewer3D: React.FC<Viewer3DProps> = ({ scene }) => {
     };
     const mat4_translation = (tx: number, ty: number, tz: number) => new Float32Array([1,0,0,0, 0,1,0,0, 0,0,1,0, tx,ty,tz,1]);
     const mat4_scale = (s: number) => new Float32Array([s,0,0,0, 0,s,0,0, 0,0,s,0, 0,0,0,1]);
-    const mat4_rotateX = (a: number) => { const c = Math.cos(a), s = Math.sin(a); return new Float32Array([1,0,0,0, 0,c,s,0, 0,-s,c,0, 0,0,0,1]); };
-    const mat4_rotateY = (a: number) => { const c = Math.cos(a), s = Math.sin(a); return new Float32Array([c,0,-s,0, 0,1,0,0, s,0,c,0, 0,0,0,1]); };
     const mat4_inverse_transpose_upper3 = (m: Float32Array) => {
       // compute inverse-transpose of upper-left 3x3; for modelView only approximate for uniform scale/rotations works
       // Here compute normal matrix as inverse-transpose of modelView (4x4) but pack into 4x4 with last row/col identity.
@@ -438,7 +435,6 @@ const Viewer3D: React.FC<Viewer3DProps> = ({ scene }) => {
       const { x: angleX, y: angleY } = rotationRef.current;
       const mats = createMatrices(angleX, angleY, zoomRef.current);
 
-     if (renderMode === 'normal') {
        // draw triangles (solid) with soft shadows
        gl.useProgram(triProgram);
        gl.bindBuffer(gl.ARRAY_BUFFER, posBuf);
@@ -462,7 +458,8 @@ const Viewer3D: React.FC<Viewer3DProps> = ({ scene }) => {
        gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, triIbuf);
        gl.drawElements(gl.TRIANGLES, triIndices.length, indexGLType, 0);
 
-       // draw edges on top
+       if (renderMode === 'wireframe') {
+      // draw edges on top
        gl.useProgram(edgeProgram);
        gl.bindBuffer(gl.ARRAY_BUFFER, posBuf);
        gl.enableVertexAttribArray(edgePosLoc);
@@ -470,22 +467,9 @@ const Viewer3D: React.FC<Viewer3DProps> = ({ scene }) => {
 
        gl.uniformMatrix4fv(edgeMvpLoc, false, mats.mvp);
        gl.uniform4fv(edgeColorLoc, new Float32Array([0,0,0,1]));
-
        try { gl.lineWidth(1.5); } catch (e) { /* ignored */ }
        gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, edgeIbuf);
        gl.drawElements(gl.LINES, edgeIndices.length, indexGLType, 0);
-     } else {
-       // wireframe mode: draw only triangle edges
-       gl.useProgram(wireframeProgram);
-       gl.bindBuffer(gl.ARRAY_BUFFER, posBuf);
-       gl.enableVertexAttribArray(wirePosLoc);
-       gl.vertexAttribPointer(wirePosLoc, 3, gl.FLOAT, false, 0, 0);
-
-       gl.uniformMatrix4fv(wireMvpLoc, false, mats.mvp);
-
-       try { gl.lineWidth(1.0); } catch (e) { /* ignored */ }
-       gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, triIbuf);
-       gl.drawElements(gl.LINE_STRIP, triIndices.length, indexGLType, 0);
      }
     };
 
@@ -571,9 +555,15 @@ const Viewer3D: React.FC<Viewer3DProps> = ({ scene }) => {
     window.dispatchEvent(ev);
   };
 
-  const toggleRenderMode = () => setRenderMode(m => m === 'normal' ? 'wireframe' : 'normal');
+  const toggleRenderMode = () => {
+  setRenderMode(m => m === 'normal' ? 'wireframe' : 'normal');
+  // Force a render by triggering resize
+  setTimeout(() => {
+    const ev = new Event('resize');
+    window.dispatchEvent(ev);
+    }, 0);
+  };
 
-  // CSS moved to index.css; use class names in JSX
 
   return (
     <div className="viewer-3d" style={{ position: 'relative' }}>
@@ -583,7 +573,7 @@ const Viewer3D: React.FC<Viewer3DProps> = ({ scene }) => {
           <canvas ref={canvasRef} className="viewer-canvas" />
           <div className="view-controls">
             <button className={`render-mode-btn ${renderMode === 'normal' ? 'normal' : 'wire'}`} onClick={toggleRenderMode}>
-              {renderMode === 'normal' ? 'Wireframe' : 'Solid'}
+              {renderMode === 'normal' ? 'Solid' : 'Show Edges'}
             </button>
             <button className="view-btn" onClick={() => setView('front')}>Front</button>
             <button className="view-btn" onClick={() => setView('top')}>Top</button>
@@ -637,7 +627,7 @@ const Viewer3D: React.FC<Viewer3DProps> = ({ scene }) => {
                 onClick={() => setTargetFormat("STL")}
                 className={`convert-btn ${targetFormat === "STL" ? "active" : ""}`}
                 disabled={scene.metadata.format?.toUpperCase() === "STL" || isConverting}
-              >
+              > 
                 STL
               </button>
             </div>
