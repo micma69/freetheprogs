@@ -18,7 +18,7 @@ const Viewer3D: React.FC<Viewer3DProps> = ({ scene }) => {
 
   const [renderMode, setRenderMode] = useState<'wireframe' | 'normal'>('normal');
 
-  // predefined views (keeps your angles)
+  // predefined views All angles
   const predefinedViews = {
     front: { x: 0, y: 0 },
     back: { x: 0, y: Math.PI },
@@ -38,6 +38,76 @@ const Viewer3D: React.FC<Viewer3DProps> = ({ scene }) => {
     'top-left': { x: Math.PI / 4, y: -Math.PI / 2 },
   } as const;
 
+  const performConversion = async (): Promise<Result<void, string>> => {
+    console.log("performConversion() called with targetFormat:", targetFormat);
+
+    if (!targetFormat) {
+      console.warn("performConversion(): no targetFormat selected");
+      return Err("No target format selected");
+    }
+
+    console.log("Sending fetch request to backend...");
+
+    const response = await fetch(
+      `http://localhost:3001/api/convert/${targetFormat.toLowerCase()}`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(scene),
+      }
+    ).catch((err) => {
+      console.error("Network error:", err);
+      return null;
+    });
+
+    if (!response) {
+      console.error("No response received (network error)");
+      return Err("Network error");
+    }
+
+    console.log("Response received, status:", response.status);
+
+    if (!response.ok) {
+      const text = await response.text();
+      console.error("Server returned error:", text);
+      return Err(text);
+    }
+
+    console.log("Server returned OK, reading blob...");
+
+    const blob = await response.blob();
+    setConvertedBlob(blob);
+
+    console.log("Blob stored in state:", blob);
+
+    return Ok(undefined);
+  };
+
+  const downloadConvertedFile = () => {
+    console.log("downloadConvertedFile() called");
+
+    if (!convertedBlob || !targetFormat) {
+      console.error("Download aborted: missing blob or format:", {
+        convertedBlob,
+        targetFormat
+      });
+      return;
+    }
+
+    console.log("Creating file:", `converted.${targetFormat.toLowerCase()}`);
+
+    const url = URL.createObjectURL(convertedBlob);
+    console.log("Object URL created:", url);
+
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `converted.${targetFormat.toLowerCase()}`;
+    a.click();
+
+    URL.revokeObjectURL(url);
+    console.log("Download triggered & URL revoked");
+  };
+  
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -536,6 +606,62 @@ const Viewer3D: React.FC<Viewer3DProps> = ({ scene }) => {
             <button className="convert-btn" disabled>C</button>
             <button className="convert-btn" disabled>D</button>
           </div></div>
+          <div className="viewer-convert">
+            <h3>Convert To</h3>
+            <div className="convert-buttons">
+              <button
+                onClick={() => setTargetFormat("OBJ")}
+                className={`convert-btn ${targetFormat === "OBJ" ? "active" : ""}`}
+                disabled={scene.metadata.format === "OBJ"}
+              >
+                OBJ
+              </button>
+
+              <button
+                onClick={() => setTargetFormat("PLY")}
+                className={`convert-btn ${targetFormat === "PLY" ? "active" : ""}`}
+                disabled={scene.metadata.format === "PLY"}
+              >
+                PLY
+              </button>
+
+              <button
+                onClick={() => setTargetFormat("glTF")}
+                className={`convert-btn ${targetFormat === "glTF" ? "active" : ""}`}
+                disabled={scene.metadata.format === "glTF"}
+              >
+                GLTF
+              </button>
+
+              <button
+                onClick={() => setTargetFormat("STL")}
+                className={`convert-btn ${targetFormat === "STL" ? "active" : ""}`}
+                disabled={scene.metadata.format === "STL"}
+              >
+                STL
+              </button>
+            </div>
+            <button
+              className="download-btn"
+              disabled={!targetFormat}
+              onClick={async () => {
+                console.log("Download button clicked");
+
+                const res = await performConversion();
+                console.log("performConversion() returned:", res);
+
+                if (res.ok) {
+                  console.log("Conversion successful -> running downloadConvertedFile()");
+                  downloadConvertedFile();
+                  console.log("downloadConvertedFile() finished");
+                } else {
+                  console.error("Conversion failed:", res.error);
+                }
+              }}
+            >
+              Download Converted File
+            </button>
+          </div>
 
           <div className="viewer-meta">
             <h3>Object Metadata</h3>

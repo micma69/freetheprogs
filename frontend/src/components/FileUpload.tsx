@@ -46,8 +46,8 @@ const FileUpload: React.FC<FileUploadProps> = ({
         filesToSet = [primaryFile];
       }
 
-      if (!extension || !['obj', 'ply', 'gltf'].includes(extension)) {
-        onError('Only OBJ, PLY, GLTF files are supported');
+      if (!extension || !['obj', 'ply', 'gltf', 'stl'].includes(extension)) {
+        onError('Only OBJ, PLY, GLTF, STL files are supported');
         event.target.value = '';
         return;
       }
@@ -154,7 +154,7 @@ const FileUpload: React.FC<FileUploadProps> = ({
         <input
           id="file-input"
           type="file"
-          accept=".obj,.ply,.gltf,.glb,.bin"
+          accept=".obj,.ply,.gltf,.glb,.bin,.stl"
           onChange={handleFileSelect}
           multiple
           style={{ display: 'none' }}
