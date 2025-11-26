@@ -134,7 +134,7 @@ export const convertToPLY = (scene: Scene): Result<string, ConvertError> =>
   );
 ```
 
-**As you see, this function (convertToPLY) are composed from smaller and simpler functions chained together to create a single, complex data transformation pipeline. Which is clearly a function composition. However, semantically speaking, since every process steps in this function are executed sequentially, and the result from the previous step becomes the input for the next step.**
+**As you see, this function (convertToPLY) is composed from smaller and simpler functions chained together to create a single, complex data transformation pipeline. Which is clearly a function composition. However, semantically speaking, since every process steps in this function are executed sequentially, and the result from the previous step becomes the input for the next step.**
 
 **In this function, there are at least three steps of data transformation : First, validate the meshes. Second, extract the vertices and faces. Third, format it into a PLY string.**
 
