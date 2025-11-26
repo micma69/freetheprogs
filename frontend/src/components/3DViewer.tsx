@@ -336,7 +336,8 @@ const Viewer3D: React.FC<Viewer3DProps> = ({ scene }) => {
       // keeping the mesh transform stable ensures switching camera angles doesn't modify the object itself
       const T = mat4_translation(-center[0], -center[1], -center[2]);
       const S = mat4_scale(baseScale);
-      let M = mat4_mul(T, S);
+      // apply translation first, then scale: M = S * T
+      let M = mat4_mul(S, T);
 
       // modelView for normals and normal matrix
       const modelView = mat4_mul(view, M);
