@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import type { Scene, Vertex } from '../types/scene';
+import { Result, Ok, Err } from '../../../shared/utils/result';
 
 interface Viewer3DProps {
   scene: Scene;
@@ -9,6 +10,9 @@ const Viewer3D: React.FC<Viewer3DProps> = ({ scene }) => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const glRef = useRef<WebGLRenderingContext | null>(null);
   const rafRef = useRef<number | null>(null);
+  const [targetFormat, setTargetFormat] = useState<"OBJ" | "PLY" | "glTF" | "STL" | null>(null);
+  const [convertedBlob, setConvertedBlob] = useState<Blob | null>(null);
+  const [isConverting, setIsConverting] = useState(false);
 
   // camera state
   const zoomRef = useRef(1.0);
@@ -18,7 +22,7 @@ const Viewer3D: React.FC<Viewer3DProps> = ({ scene }) => {
 
   const [renderMode, setRenderMode] = useState<'wireframe' | 'normal'>('normal');
 
-  // predefined views All angles
+  // predefined views All
   const predefinedViews = {
     front: { x: 0, y: 0 },
     back: { x: 0, y: Math.PI },
@@ -38,7 +42,13 @@ const Viewer3D: React.FC<Viewer3DProps> = ({ scene }) => {
     'top-left': { x: Math.PI / 4, y: -Math.PI / 2 },
   } as const;
 
-  const performConversion = async (): Promise<Result<void, string>> => {
+  // Reset format when new scene is loaded
+  useEffect(() => {
+    setTargetFormat(null);
+    setConvertedBlob(null);
+  }, [scene]);
+
+  const performConversion = async (): Promise<Result<Blob, string>> => {
     console.log("performConversion() called with targetFormat:", targetFormat);
 
     if (!targetFormat) {
@@ -74,13 +84,9 @@ const Viewer3D: React.FC<Viewer3DProps> = ({ scene }) => {
     }
 
     console.log("Server returned OK, reading blob...");
-
     const blob = await response.blob();
-    setConvertedBlob(blob);
-
-    console.log("Blob stored in state:", blob);
-
-    return Ok(undefined);
+    setConvertedBlob(blob); // still cache for reference
+    return Ok(blob);
   };
 
   const downloadConvertedFile = () => {
@@ -600,19 +606,13 @@ const Viewer3D: React.FC<Viewer3DProps> = ({ scene }) => {
         </div>
 
         <div className="viewer-right">
-          <div className="viewer-convert"><h3>Convert To</h3><div className="convert-buttons">
-            <button className="convert-btn" disabled>A</button>
-            <button className="convert-btn" disabled>B</button>
-            <button className="convert-btn" disabled>C</button>
-            <button className="convert-btn" disabled>D</button>
-          </div></div>
           <div className="viewer-convert">
             <h3>Convert To</h3>
             <div className="convert-buttons">
               <button
                 onClick={() => setTargetFormat("OBJ")}
                 className={`convert-btn ${targetFormat === "OBJ" ? "active" : ""}`}
-                disabled={scene.metadata.format === "OBJ"}
+                disabled={scene.metadata.format?.toUpperCase() === "OBJ" || isConverting}
               >
                 OBJ
               </button>
@@ -620,7 +620,7 @@ const Viewer3D: React.FC<Viewer3DProps> = ({ scene }) => {
               <button
                 onClick={() => setTargetFormat("PLY")}
                 className={`convert-btn ${targetFormat === "PLY" ? "active" : ""}`}
-                disabled={scene.metadata.format === "PLY"}
+                disabled={scene.metadata.format?.toUpperCase() === "PLY" || isConverting}
               >
                 PLY
               </button>
@@ -628,7 +628,7 @@ const Viewer3D: React.FC<Viewer3DProps> = ({ scene }) => {
               <button
                 onClick={() => setTargetFormat("glTF")}
                 className={`convert-btn ${targetFormat === "glTF" ? "active" : ""}`}
-                disabled={scene.metadata.format === "glTF"}
+                disabled={scene.metadata.format?.toUpperCase() === "GLTF" || isConverting}
               >
                 GLTF
               </button>
@@ -636,30 +636,39 @@ const Viewer3D: React.FC<Viewer3DProps> = ({ scene }) => {
               <button
                 onClick={() => setTargetFormat("STL")}
                 className={`convert-btn ${targetFormat === "STL" ? "active" : ""}`}
-                disabled={scene.metadata.format === "STL"}
+                disabled={scene.metadata.format?.toUpperCase() === "STL" || isConverting}
               >
                 STL
               </button>
             </div>
             <button
               className="download-btn"
-              disabled={!targetFormat}
+              disabled={!targetFormat || isConverting}
               onClick={async () => {
                 console.log("Download button clicked");
+                setIsConverting(true);
 
                 const res = await performConversion();
                 console.log("performConversion() returned:", res);
 
                 if (res.ok) {
-                  console.log("Conversion successful -> running downloadConvertedFile()");
-                  downloadConvertedFile();
-                  console.log("downloadConvertedFile() finished");
+                  console.log("Conversion successful, downloading");
+                  
+                  const url = URL.createObjectURL(res.value);
+                  const a = document.createElement("a");
+                  a.href = url;
+                  a.download = `converted.${targetFormat.toLowerCase()}`;
+                  a.click();
+                  URL.revokeObjectURL(url);
+                  console.log("Download triggered");
                 } else {
                   console.error("Conversion failed:", res.error);
                 }
+
+                setIsConverting(false);
               }}
             >
-              Download Converted File
+              {isConverting ? 'Converting...' : 'Download Converted File'}
             </button>
           </div>
 
