@@ -1,3 +1,5 @@
+![alt text](https://github.com/micma69/freetheprogs/blob/cha/images/"comfy aizen".png?raw=true)
+
 # 3D Format Parser and Converter
 
 A web application for viewing and converting 3D file formats using functional programming principles.
@@ -39,3 +41,8 @@ npm run dev:frontend
 - **Backend**: Node.js, TypeScript, Express.js
 - **Frontend**: React, TypeScript, WebGL
 - **Paradigm**: Functional Programming
+
+## Functional programming aspects we've implemented
+
+- **Pure Function**
+![alt text](https://github.com/micma69/freetheprogs/blob/cha/images/purefunction/sample1.jpg?raw=true)
