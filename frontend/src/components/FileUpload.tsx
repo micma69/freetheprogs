@@ -40,7 +40,7 @@ const FileUpload: React.FC<FileUploadProps> = ({
         extension = 'gltf';
         filesToSet = binFile ? [gltfFile, binFile] : [gltfFile];
       } else {
-        // Single file workflow (OBJ, PLY, GLB)
+        // Single file workflow (OBJ, PLY, GLB, STL)
         primaryFile = files[0];
         extension = primaryFile.name.split('.').pop()?.toLowerCase();
         filesToSet = [primaryFile];

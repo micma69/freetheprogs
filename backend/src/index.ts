@@ -11,7 +11,7 @@ import { parsePLY } from '../../shared/parsers/ply';
 import { parseSTL } from '../../shared/parsers/stl'
 import { parseGLTF } from '../../shared/parsers/gltf';
 import { convertToPLY } from '../../shared/converters/ply';
-import { toObj } from '../../shared/converters/obj';
+import { toOBJ } from '../../shared/converters/obj';
 import { toGLTF } from '../../shared/converters/gltf';
 import { toSTL } from '../../shared/converters/stl';
 
@@ -103,37 +103,38 @@ app.post('/api/parse/ply', upload.single('file'), (req: Request, res: Response) 
 });
 
 // Parse GLTF file endpoint
-app.post('/api/parse/gltf', upload.single('file'), (req: Request, res: Response) => {
-  if (!req.file) {
-    return res.status(400).json({ error: 'No file uploaded' });
-  }
-
+app.post('/api/parse/gltf', upload.fields([
+  { name: 'file', maxCount: 1 },
+  { name: 'additionalFiles', maxCount: 1 }
+]), async (req, res) => {
   try {
-    const buffer = req.file.buffer;
-    const content = new TextDecoder().decode(buffer);
-
-    const result = parseGLTF(content);
+    if (!req.files || typeof req.files === 'object' && !('file' in req.files)) {
+      return res.status(400).json({ error: 'No GLTF file uploaded' });
+    }
+    
+    const gltfFile = (req.files as { [fieldname: string]: Express.Multer.File[] })['file'][0];
+    const additionalFiles = (req.files as { [fieldname: string]: Express.Multer.File[] })['additionalFiles'] || [];
+    
+    const gltfContent = gltfFile.buffer.toString('utf-8');
+    
+    // Create map of external buffers
+    const externalBuffers = new Map<string, ArrayBuffer>();
+    for (const file of additionalFiles) {
+      externalBuffers.set(file.originalname, file.buffer.buffer as ArrayBuffer);
+    }
+    
+    console.log("Before Parsing")
+    const result = parseGLTF(gltfContent, externalBuffers); //REcursion inside of parser not uploaded.tsx T_T
+    console.log('Parse complete:',result.ok);
 
     if (result.ok) {
-      res.json({
-        success: true,
-        data: result.value,
-      });
+      console.log('Attempting JSON serialization...');
+      return res.json({ success: true, data: result.value });
     } else {
-      const error = result.error as GLTFParseError;
-      res.status(400).json({
-        success: false,
-        error: {
-          message: error.message,
-          path: error.path,
-        },
-      });
+      return res.json({ success: false, error: result.error });
     }
-  } catch (err) {
-    res.status(500).json({
-      success: false,
-      error: { message: err instanceof Error ? err.message : 'Unknown error' },
-    });
+  } catch (error) {
+    return res.status(500).json({ success: false, error: { message: error instanceof Error ? error.message : 'Unknown error' } });
   }
 });
 

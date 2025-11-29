@@ -7,14 +7,7 @@
 import type { Scene, Vertex, Vec3, Vec2, Face, Mesh } from '../types/scene';
 import type { Result } from '../utils/result';
 import { Ok, Err, map, andThen, pipe, all, takeArray, dropArray, zipArray, traverse } from '../utils/result';
-import {
-  createVec3,
-  createVec2,
-  createVertex,
-  createFace,
-  createMesh,
-  createScene,
-} from '../types/scene';
+import { createVec3, createVec2, createVertex, createFace, createMesh, createScene } from '../types/scene';
 
 export type ParseError = {
   readonly message: string;
