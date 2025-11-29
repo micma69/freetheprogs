@@ -298,7 +298,8 @@ export const toGLTF = (scene: Scene): Result<string> => {
     for (const c of chunks) {
       writeCursor = align4(writeCursor);
       finalU8.set(new Uint8Array(c.data), writeCursor);
-      writeCursor += align4(c.data.byteLength); // we pad each chunk to 4 bytes for next alignment
+      // advance by the actual data length; next loop iteration will align the cursor
+      writeCursor += c.data.byteLength;
     }
 
     // Assemble glTF JSON structure

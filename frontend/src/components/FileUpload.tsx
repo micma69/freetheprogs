@@ -40,14 +40,14 @@ const FileUpload: React.FC<FileUploadProps> = ({
         extension = 'gltf';
         filesToSet = binFile ? [gltfFile, binFile] : [gltfFile];
       } else {
-        // Single file workflow (OBJ, PLY, GLB)
+        // Single file workflow (OBJ, PLY, GLB, STL)
         primaryFile = files[0];
         extension = primaryFile.name.split('.').pop()?.toLowerCase();
         filesToSet = [primaryFile];
       }
 
-      if (!extension || !['obj', 'ply', 'gltf'].includes(extension)) {
-        onError('Only OBJ, PLY, GLTF files are supported');
+      if (!extension || !['obj', 'ply', 'gltf', 'stl'].includes(extension)) {
+        onError('Only OBJ, PLY, GLTF, STL files are supported');
         event.target.value = '';
         return;
       }
@@ -154,7 +154,7 @@ const FileUpload: React.FC<FileUploadProps> = ({
         <input
           id="file-input"
           type="file"
-          accept=".obj,.ply,.gltf,.glb,.bin"
+          accept=".obj,.ply,.gltf,.glb,.bin,.stl"
           onChange={handleFileSelect}
           multiple
           style={{ display: 'none' }}

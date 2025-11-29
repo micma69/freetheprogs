@@ -23,15 +23,26 @@ export const convertToPLY = (scene: Scene): Result<string, ConvertError> =>
     scene.meshes,
     // flatten all meshes → vertices & faces
     meshes =>
-      meshes.length === 0
-        ? Err({ message: "Scene contains no meshes" })
-        : Ok(meshes),
-    flatMapResult => flatMapResult.ok
-      ? Ok({
-          vertices: flatMapArray((m: Mesh) => m.vertices)(flatMapResult.value),
-          faces: flatMapArray((m: Mesh) => m.faces)(flatMapResult.value),
-        })
-      : flatMapResult,
+      meshes.length === 0 ? Err({ message: "Scene contains no meshes" }) : Ok(meshes),
+    result =>
+      result.ok
+        ? ((): Result<{ vertices: Vertex[]; faces: Face[] }, ConvertError> => {
+            const vertices: Vertex[] = [];
+            const faces: Face[] = [];
+            let vertexOffset = 0;
+            for (const m of result.value) {
+              vertices.push(...m.vertices);
+              for (const f of m.faces) {
+                faces.push({
+                  ...f,
+                  indices: f.indices.map(i => i + vertexOffset),
+                });
+              }
+              vertexOffset += m.vertices.length;
+            }
+            return Ok({ vertices, faces });
+          })()
+        : result,
     result =>
       result.ok
         ? Ok(

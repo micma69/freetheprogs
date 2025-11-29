@@ -1,117 +1,76 @@
-/**
- * Convert internal Scene -> ASCII STL formatted string
- * - Functional style: small pure helpers, immutable transforms
- * - Returns Result<string, string> using project's Ok/Err pattern
- * - Triangulates polygonal faces using a fan method (assumes meshes are manifold or fans are acceptable)
- *
- * This converter is kept consistent with other converters in this directory (obj.ts, gltf.tsx)
- * and integrates with the project's Scene/Mesh/Vertex shape.
- */
+import type { Scene, Mesh, Vertex, Face, Vec3 } from "../types/scene";
+import { type Result, Ok, Err, pipe, mapArray } from "../utils/result";
+import { createVec3 } from "../types/scene";
 
-import type { Scene, Vertex } from '../types/scene';
-import { Ok, Err } from '../utils/result';
+export type ConvertError = { readonly message: string };
 
 /**
- * Stable float formatting (avoid excessive trailing zeros)
+ * Calculate face normal from three vertices
  */
-const fmt = (n: number): string => {
-  // Keep a concise decimal representation, but ensure small numbers don't become exponential
-  // Use Number.toPrecision only for extremes, otherwise plain toString is fine.
-  if (!isFinite(n)) return '0';
-  // Avoid scientific notation for typical 3D coordinates
-  const abs = Math.abs(n);
-  if (abs !== 0 && (abs < 1e-6 || abs >= 1e6)) {
-    // fallback to fixed with 6 decimals for readability
-    return n.toFixed(6).replace(/(?:\.0+|(\.\d+?)0+)$/, '$1');
-  }
-  return Number(n).toString();
-};
-
-/* Vector helpers (pure) */
-const sub = (a: { x: number; y: number; z: number }, b: { x: number; y: number; z: number }) => ({
-  x: a.x - b.x,
-  y: a.y - b.y,
-  z: a.z - b.z,
-});
-
-const cross = (a: { x: number; y: number; z: number }, b: { x: number; y: number; z: number }) => ({
-  x: a.y * b.z - a.z * b.y,
-  y: a.z * b.x - a.x * b.z,
-  z: a.x * b.y - a.y * b.x,
-});
-
-const normalize = (v: { x: number; y: number; z: number }) => {
-  const len = Math.sqrt(v.x * v.x + v.y * v.y + v.z * v.z);
-  if (len === 0) return { x: 0, y: 0, z: 0 };
-  return { x: v.x / len, y: v.y / len, z: v.z / len };
-};
-
-/* Triangulate a face indices array using fan method
-   - Accepts an array of indices [i0, i1, i2, i3, ...]
-   - Returns array of triangles, each triangle is [a,b,c] indices (local to mesh.vertices)
-*/
-const triangulateFace = (indices: number[]): number[][] => {
-  if (indices.length < 3) return [];
-  if (indices.length === 3) return [indices.slice(0, 3)];
-  const triangles: number[][] = [];
-  const i0 = indices[0];
-  for (let i = 1; i < indices.length - 1; i++) {
-    triangles.push([i0, indices[i], indices[i + 1]]);
-  }
-  return triangles;
+const calculateFaceNormal = (v0: Vec3, v1: Vec3, v2: Vec3): Vec3 => {
+  const u = createVec3(v1.x - v0.x, v1.y - v0.y, v1.z - v0.z);
+  const v = createVec3(v2.x - v0.x, v2.y - v0.y, v2.z - v0.z);
+  
+  const nx = u.y * v.z - u.z * v.y;
+  const ny = u.z * v.x - u.x * v.z;
+  const nz = u.x * v.y - u.y * v.x;
+  
+  const length = Math.sqrt(nx * nx + ny * ny + nz * nz);
+  
+  return length > 0 
+    ? createVec3(nx / length, ny / length, nz / length)
+    : createVec3(0, 0, 1);
 };
 
 /**
- * Build an ASCII STL string from a Scene
+ * Convert a triangular face to STL facet lines
  */
-export const toSTL = (scene: Scene) => {
-  try {
-    const lines: string[] = [];
-    // Use a single `solid` wrapper for the whole scene; include scene metadata.format if present
-    const name = (scene.metadata && scene.metadata.format) ? `freetheprogs_${scene.metadata.format}` : 'freetheprogs';
-    lines.push(`solid ${name}`);
-
-    // Iterate meshes and faces, emit triangles
-    for (const mesh of scene.meshes) {
-      const meshName = mesh.name || 'mesh';
-      // Optionally include a comment with mesh name
-      lines.push(`  // mesh ${meshName}`);
-
-      // For each face, triangulate and emit facets
-      for (const face of mesh.faces) {
-        const tris = triangulateFace(face.indices);
-        for (const tri of tris) {
-          const v0: Vertex = mesh.vertices[tri[0]];
-          const v1: Vertex = mesh.vertices[tri[1]];
-          const v2: Vertex = mesh.vertices[tri[2]];
-
-          if (!v0 || !v1 || !v2) {
-            // Skip invalid triangles gracefully
-            continue;
-          }
-
-          // compute face normal (right-hand rule)
-          const e1 = sub(v1.position, v0.position);
-          const e2 = sub(v2.position, v0.position);
-          const n = normalize(cross(e1, e2));
-
-          lines.push(`  facet normal ${fmt(n.x)} ${fmt(n.y)} ${fmt(n.z)}`);
-          lines.push(`    outer loop`);
-          lines.push(`      vertex ${fmt(v0.position.x)} ${fmt(v0.position.y)} ${fmt(v0.position.z)}`);
-          lines.push(`      vertex ${fmt(v1.position.x)} ${fmt(v1.position.y)} ${fmt(v1.position.z)}`);
-          lines.push(`      vertex ${fmt(v2.position.x)} ${fmt(v2.position.y)} ${fmt(v2.position.z)}`);
-          lines.push(`    endloop`);
-          lines.push(`  endfacet`);
-        }
-      }
-    }
-
-    lines.push(`endsolid ${name}`);
-    const content = lines.join('\n') + '\n';
-    return Ok(content);
-  } catch (err) {
-    return Err((err as Error).message || 'Unknown error while converting to STL');
+const faceToFacetLines = (vertices: readonly Vertex[], face: Face): readonly string[] => {
+  if (face.indices.length !== 3) {
+    return [];
   }
+
+  const [v0, v1, v2] = face.indices.map(idx => vertices[idx].position);
+  const normal = calculateFaceNormal(v0, v1, v2);
+  
+  return [
+    `facet normal ${normal.x} ${normal.y} ${normal.z}`,
+    "  outer loop",
+    `    vertex ${v0.x} ${v0.y} ${v0.z}`,
+    `    vertex ${v1.x} ${v1.y} ${v1.z}`,
+    `    vertex ${v2.x} ${v2.y} ${v2.z}`,
+    "  endloop",
+    "endfacet"
+  ];
 };
 
-export default toSTL;
+export const toSTL = (scene: Scene, solidName: string = "converted"): Result<string, ConvertError> =>
+  pipe(
+    scene.meshes,
+    meshes => meshes.length === 0 
+      ? Err({ message: "Scene contains no meshes" }) 
+      : Ok(meshes),
+    result =>
+      result.ok
+        ? Ok(
+            result.value.flatMap(mesh =>
+              mesh.faces.flatMap(face => 
+                faceToFacetLines(mesh.vertices, face)
+              )
+            )
+          )
+        : result,
+    result =>
+      result.ok
+        ? Ok(
+            pipe(
+              [`solid ${solidName}`],
+              header =>
+                header
+                  .concat(result.value)
+                  .concat(`endsolid ${solidName}`)
+                  .join("\n")
+            )
+          )
+        : result
+  );
