@@ -138,22 +138,30 @@ app.post('/api/parse/gltf', upload.fields([
   }
 });
 
-// Parse STL file endpoint
-app.post("/api/parse/stl", upload.single("file"),(req, res) => {
-  if (!req.file) {
-    return res.status(400).json({ success: false, error: "No file uploaded" });
+app.post("/api/parse/stl", upload.single("file"), (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ success: false, error: "No file uploaded" });
+    }
+
+    const result = parseSTLFromBuffer(req.file.buffer);
+
+    if (!result.ok) {
+      return res.status(400).json({ success: false, error: result.error });
+    }
+
+    return res.json({
+      success: true,
+      data: result.value,
+    });
+  } catch (e) {
+    return res.status(500).json({
+      success: false,
+      error: {
+        message: e instanceof Error ? e.message : "Unknown error",
+      },
+    });
   }
-
-  const result = parseSTLFromBuffer(req.file.buffer);
-
-  if (!result.ok) {
-    return res.status(400).json({ success: false, error: result.error });
-  }
-
-  return res.json({
-    success: true,
-    data: result.value
-  });
 });
 
 // Convert to OBJ endpoint

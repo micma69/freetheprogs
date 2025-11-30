@@ -15,26 +15,35 @@ export type ParseError = {
 };
 
 const detectSTLType = (buffer: Buffer): Result<"ascii" | "binary", ParseError> => {
-  if (buffer.length < 6) {
+  if (buffer.length < 5) {
     return Err({ message: "File too small to be STL", line: 0 });
   }
 
-  const ascii = buffer.toString("utf8");
+  const firstBytes = buffer.subarray(0, 300).toString("utf8");
+  const fullText = buffer.toString("utf8");
 
-  // Must start with "solid <word>" AND include "facet"
-  const trimmed = ascii.trimStart().toLowerCase();
+  const startsWithSolid = firstBytes.trimStart().toLowerCase().startsWith("solid");
 
-  if (trimmed.startsWith("solid")) {
-    // ASCII STLs always contain "facet normal"
-    if (trimmed.includes("facet normal")) {
-      return Ok("ascii");
-    }
+  const hasNullBytes = buffer.includes(0);
+  const hasFacet = fullText.includes("facet");
+
+  // Binary always contains null bytes
+  if (hasNullBytes) return Ok("binary");
+
+  // ASCII must start with "solid"
+  if (startsWithSolid && hasFacet) {
+    return Ok("ascii");
   }
 
-  // Otherwise must be binary
+  // If it starts with solid and contains NO binary signature, assume ASCII
+  if (startsWithSolid) {
+    return Ok("ascii");
+  }
+
+  // Otherwise assume binary (as last resort)
   if (buffer.length >= 84) return Ok("binary");
 
-  return Err({ message: "Unrecognized STL format", line: 0 });
+  return Err({ message: "Unrecognized STL file (neither ASCII nor binary)", line: 0 });
 };
 
 /**
@@ -103,11 +112,14 @@ const parseBinarySTL = (buffer: Buffer): Result<Scene, ParseError> => {
     return Err({ message: "Binary STL too small", line: 0 });
   }
 
-  const count = buffer.readUInt32LE(80);
-  const expected = 84 + count * 50;
+  const triangleCount = buffer.readUInt32LE(80);
+  const expectedLength = 84 + triangleCount * 50;
 
-  if (expected > buffer.length) {
-    return Err({ message: "Binary STL is truncated", line: 0 });
+  if (buffer.length < expectedLength) {
+    return Err({
+      message: `Binary STL truncated: expected ${expectedLength} bytes, got ${buffer.length}`,
+      line: 0
+    });
   }
 
   const vertices: Vertex[] = [];
@@ -115,35 +127,41 @@ const parseBinarySTL = (buffer: Buffer): Result<Scene, ParseError> => {
 
   let offset = 84;
 
-  for (let i = 0; i < count; i++) {
+  for (let i = 0; i < triangleCount; i++) {
     if (offset + 50 > buffer.length) {
       return Err({ message: "Unexpected end of file", line: i });
     }
 
-    // skip normal
-    offset += 12;
+    const normal = {
+      x: buffer.readFloatLE(offset),
+      y: buffer.readFloatLE(offset + 4),
+      z: buffer.readFloatLE(offset + 8),
+    };
 
+    // vertices start at offset+12
     const v1 = createVec3(
-      buffer.readFloatLE(offset),
-      buffer.readFloatLE(offset + 4),
-      buffer.readFloatLE(offset + 8)
-    );
-    const v2 = createVec3(
       buffer.readFloatLE(offset + 12),
       buffer.readFloatLE(offset + 16),
       buffer.readFloatLE(offset + 20)
     );
-    const v3 = createVec3(
+
+    const v2 = createVec3(
       buffer.readFloatLE(offset + 24),
       buffer.readFloatLE(offset + 28),
       buffer.readFloatLE(offset + 32)
+    );
+
+    const v3 = createVec3(
+      buffer.readFloatLE(offset + 36),
+      buffer.readFloatLE(offset + 40),
+      buffer.readFloatLE(offset + 44)
     );
 
     const base = vertices.length;
     vertices.push(createVertex(v1), createVertex(v2), createVertex(v3));
     faces.push(createFace([base, base + 1, base + 2]));
 
-    offset += 50;
+    offset += 50; // correct advance
   }
 
   return Ok(
@@ -151,7 +169,7 @@ const parseBinarySTL = (buffer: Buffer): Result<Scene, ParseError> => {
       [createMesh("stl", vertices, faces)],
       [],
       {
-        format: "STL",
+        format: "STL (binary)",
         vertexCount: vertices.length,
         faceCount: faces.length,
       }
