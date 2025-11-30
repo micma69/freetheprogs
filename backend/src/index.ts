@@ -8,7 +8,7 @@ import multer from 'multer';
 import type { ParseError } from '../../shared/parsers/obj';
 import { parseOBJ } from '../../shared/parsers/obj'
 import { parsePLY } from '../../shared/parsers/ply';
-import { parseSTL } from '../../shared/parsers/stl'
+import { parseSTL, parseSTLFromBuffer } from '../../shared/parsers/stl'
 import { parseGLTF } from '../../shared/parsers/gltf';
 import { convertToPLY } from '../../shared/converters/ply';
 import { toOBJ } from '../../shared/converters/obj';
@@ -139,38 +139,21 @@ app.post('/api/parse/gltf', upload.fields([
 });
 
 // Parse STL file endpoint
-app.post('/api/parse/stl', upload.single('file'), (req: Request, res: Response) => {
+app.post("/api/parse/stl", upload.single("file"),(req, res) => {
   if (!req.file) {
-    return res.status(400).json({ error: 'No file uploaded' });
+    return res.status(400).json({ success: false, error: "No file uploaded" });
   }
 
-  try {
-    const buffer = req.file.buffer;
-    const content = new TextDecoder().decode(buffer);
+  const result = parseSTLFromBuffer(req.file.buffer);
 
-    const result = parseSTL(content);
-
-    if (result.ok) {
-      res.json({
-        success: true,
-        data: result.value,
-      });
-    } else {
-      const error = result.error as ParseError;
-      res.status(400).json({
-        success: false,
-        error: {
-          message: error.message,
-          line: error.line,
-        },
-      });
-    }
-  } catch (err) {
-    res.status(500).json({
-      success: false,
-      error: { message: err instanceof Error ? err.message : 'Unknown error' },
-    });
+  if (!result.ok) {
+    return res.status(400).json({ success: false, error: result.error });
   }
+
+  return res.json({
+    success: true,
+    data: result.value
+  });
 });
 
 // Convert to OBJ endpoint
