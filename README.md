@@ -1,6 +1,7 @@
-[Welcome guys](https://github.com/micma69/freetheprogs/blob/cha/images/comfy%20aizen.png?raw=true)
+[Deployed Link (not_yet Im sorry)](https://github.com/micma69/freetheprogs/blob/cha/images/comfy%20aizen.png?raw=true)
 
 # 3D Format Parser and Converter
+
 
 A web application for viewing and converting 3D file formats using functional programming principles.
 Ini adalah aplikasi berbasis web, yang fungsinya buat mengubah file-file 3D ke jenis file 3D lainnya
@@ -42,11 +43,16 @@ npm run dev:frontend
 - **Frontend**: React, TypeScript, WebGL
 - **Paradigm**: Functional Programming
 
+  ## ParserLogic
+  ### GLTF
+  ### OBJ PLY STL
+  ### Converted Scene
+
 ## Functional programming aspects we've implemented
 
-- **Pure Function**
+### **Pure Function**
 
-**The function (located in ../shared/converters/obj.ts) below returns a string version of a numeric data**
+The function (located in ../shared/converters/obj.ts) below returns a string version of a numeric data
 
 ```typescript 
 const fmt = (n: number): string => {
@@ -54,34 +60,35 @@ const fmt = (n: number): string => {
 };
 ```
 
-**As you see, this function will always accepts numerical information as inputs and produces strings, without any side-effects**
+As you see, this function will always accepts numerical information as inputs and produces strings, without any side-effects
 
 
-- **Immutability**
+### Immutability
 
-**The function below (located in ../shared/converters/obj.ts) pushes new elements into an array (we call it meshVertexIndices) and return the new length of that array**
+The function below (located in ../shared/converters/obj.ts) pushes new elements into an array (we call it meshVertexIndices) and return the new length of that array
 
-```typescript 
+```typescript
+
 meshVertexIndices.push(Object.freeze(perVert));
 ```
 
-**As you see, this function uses Object.freeze() function, which forbids any change to the array named "perVert". So while meshVertexIndices will keep getting new perVert data, the perVert data itself is immutable**
+As you see, this function uses Object.freeze() function, which forbids any change to the array named "perVert". So while meshVertexIndices will keep getting new perVert data, the perVert data itself is immutable and it also make uses of an immutable data structure making sure data can only be read from and not editable where both immutability and pure functions benefit us by having a predictable and testable results.
 
 
-- **High Order Function and Currying**
+### High Order Function and Currying
 
-**The code snippet below is the part of a function that converts a non-PLY 3D file into a 3D PLY file. This code snippet however, builds a large string by combining a header string with data processed from vertices and faces**
+The code snippet below is the part of a function that converts a non-PLY 3D file into a 3D PLY file. This code snippet however, builds a large string by combining a header string with data processed from vertices and faces
 
 ```typescript 
 header=>header.concat(mapArray(formatVertex)(result.value.vertices)).concat(mapArray(formatFace)(result.value.faces)).join("\n")
 ```
 
-**This code snippet is an example of a high-order function. In the 'mapArray' part, the 'mapArray' accepts the function of 'formatVertex' as the input and the function of 'result.value.vertices' as the output.**
+This code snippet is an example of a high-order function. In the 'mapArray' part, the 'mapArray' accepts the function of 'formatVertex' as the input and the function of 'result.value.vertices' as the output.
 
-**This code snippet, especially in mapArray arguments, summons a function that creates another function to receive the rest of the arguments. It's clearly an implementation of currying.**
+This code snippet, especially in mapArray arguments, summons a function that creates another function to receive the rest of the arguments. It's clearly an implementation of currying.
 
 
-- **Monad for Error Handling**
+### **Monad for Error Handling**
 ```typescript
 const parseLines = (content: string): Result<OBJData, ParseError> => {
   const lines = content.split('\n');
@@ -96,7 +103,8 @@ const parseLines = (content: string): Result<OBJData, ParseError> => {
   return map(result, acc => acc.data);
 };
 ```
+> The snippet is located in `shared\parsers\obj.ts` around line 235
+
 In this project the Result Monad (where  it is written as Result<T, E> with Ok and Err) is used to handle parsing errors cleanly. Instead of writing if and return error at every step, the Result pattern lets you chain operations like flatMap or andThen, so each step only runs if the previous one succeeded. If something fails, the error automatically flows through the chain. This makes the code easier to read, keeps the logic tidy, and avoids scattering error checks everywhere.
 
-```
 
