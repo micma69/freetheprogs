@@ -577,9 +577,6 @@ const safeArrayBufferDetection = (content: ArrayBuffer): Result<Scene, ParseErro
   return andThen(maybeFull, parseASCII);
 };
 
-
-
-
 export const parsePLY = (content: string | ArrayBuffer): Result<Scene, ParseError> =>
   typeof content === 'string' 
     ? parseASCII(content)
