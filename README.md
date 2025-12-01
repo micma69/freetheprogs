@@ -7,9 +7,9 @@ Ini adalah aplikasi berbasis web, yang fungsinya buat mengubah file-file 3D ke j
 (misal, dari .obj ke .ply)
 
 ## Features
-- Parse and validate 3D files (OBJ, STL, PLY, GLTF)
-- Convert between different 3D formats (WIP)
-- 3D viewer with 14-angle camera option (X+, X-, Y+, Y-, Z+, Z-, + diagonals) (TODO)
+- Parse and validate 3D files (OBJ, STL, PLY, GLTF Currently Supported)
+- Convert between different 3D formats
+- 3D viewer with different camera angle and 360 view with mouse click and hold
 
 ## Project Structure
 ```
@@ -81,67 +81,22 @@ header=>header.concat(mapArray(formatVertex)(result.value.vertices)).concat(mapA
 **This code snippet, especially in mapArray arguments, summons a function that creates another function to receive the rest of the arguments. It's clearly an implementation of currying.**
 
 
-- **Function Composition / Sequence**
+- **Monad for Error Handling**
+```typescript
+const parseLines = (content: string): Result<OBJData, ParseError> => {
+  const lines = content.split('\n');
+  
+//implementation details
 
-**The function below converts a non-PLY 3D file into a 3D PLY file.**
-
-```typescript 
-export const convertToPLY = (scene: Scene): Result<string, ConvertError> =>
-  pipe(
-    scene.meshes,
-    meshes =>
-      meshes.length === 0
-        ? Err({ message: "Scene contains no meshes" })
-        : Ok(meshes),
-    flatMapResult => flatMapResult.ok
-      ? Ok({
-          vertices: flatMapArray((m: Mesh) => m.vertices)(flatMapResult.value),
-          faces: flatMapArray((m: Mesh) => m.faces)(flatMapResult.value),
-        })
-      : flatMapResult,
-    result =>
-      result.ok
-        ? Ok(
-            pipe(
-              [
-                "ply",
-                "format ascii 1.0",
-                `element vertex ${result.value.vertices.length}`,
-                "property float x",
-                "property float y",
-                "property float z",
-                "property float nx",
-                "property float ny",
-                "property float nz",
-                "property float s",
-                "property float t",
-                `element face ${result.value.faces.length}`,
-                "property list uchar int vertex_indices",
-                "end_header",
-              ],
-              header =>
-                header
-                  .concat(
-                    mapArray(formatVertex)(result.value.vertices)
-                  )
-                  .concat(
-                    mapArray(formatFace)(result.value.faces)
-                  )
-                  .join("\n")
-            )
-          )
-        : result
+  const result = parsedLines.reduce<Result<{ data: OBJData; currentMaterial?: string }, ParseError>>(
+    (accResult, line) => andThen(accResult, acc => processLine(acc, line)),
+    Ok(initial)
   );
+
+  return map(result, acc => acc.data);
+};
 ```
+In this project the Result Monad (where  it is written as Result<T, E> with Ok and Err) is used to handle parsing errors cleanly. Instead of writing if and return error at every step, the Result pattern lets you chain operations like flatMap or andThen, so each step only runs if the previous one succeeded. If something fails, the error automatically flows through the chain. This makes the code easier to read, keeps the logic tidy, and avoids scattering error checks everywhere.
 
-**As you see, this function (convertToPLY) is composed from smaller and simpler functions chained together to create a single, complex data transformation pipeline. Which is clearly a function composition. However, semantically speaking, since every process steps in this function are executed sequentially, and the result from the previous step becomes the input for the next step.**
-
-**In this function, there are at least three steps of data transformation : First, validate the meshes. Second, extract the vertices and faces. Third, format it into a PLY string.**
-
-
-- **Other functional programming principles we've use :**
-
-```Typescript
-///TBA
 ```
 
