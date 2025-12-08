@@ -153,6 +153,25 @@ const parseLines = (content: string): Result<OBJData, ParseError> => {
 ```
 > The snippet is located in `shared\parsers\obj.ts` around line 235
 
+
+
 In this project the Result Monad (where  it is written as Result<T, E> with Ok and Err) is used to handle parsing errors cleanly. Instead of writing if and return error at every step, the Result pattern lets you chain operations like flatMap or andThen, so each step only runs if the previous one succeeded. If something fails, the error automatically flows through the chain. This makes the code easier to read, keeps the logic tidy, and avoids scattering error checks everywhere.
 
+### **Curry or Partial Eval**
+```typescript
+const vertexLines = takeArray(vertexElem.count)(bodyLines);
+const faceLines = faceElem ? takeArray(faceElem.count)(dropArray(vertexElem.count)(bodyLines)) : [];
 
+return pipe(
+  traverse(parseAsciiVertexLine(vertexElem.properties))(vertexLines),
+  // ...
+);
+```
+
+```typescript
+export const takeArray = (count: number) => <T>(arr: readonly T[]): readonly T[] => arr.slice(0, count);
+```
+
+> The snippet located in `shared/parsers/ply.ts, lines 267-268, 271`
+
+In this project `takeArray`  is a function that takes a number count and returns a new function that takes an array and returns the first count elements of that array as opposed to the non curried implmentaiton `takeArray(count, arr)`.  With that type of implementation it makes functions more composable.
