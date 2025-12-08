@@ -4,8 +4,6 @@
 
 
 A web application for viewing and converting 3D file formats using functional programming principles.
-Ini adalah aplikasi berbasis web, yang fungsinya buat mengubah file-file 3D ke jenis file 3D lainnya
-(misal, dari .obj ke .ply)
 
 ## Features
 - Parse and validate 3D files (OBJ, STL, PLY, GLTF Currently Supported)
@@ -52,40 +50,90 @@ npm run dev:frontend
 
 ### **Pure Function**
 
-The function (located in ../shared/converters/obj.ts) below returns a string version of a numeric data
+The function Pure bounding box calculation located in (shared/parsers/ply.ts, lines 474-490).
 
 ```typescript 
-const fmt = (n: number): string => {
-  return Number(n).toString();
+const calculateBoundingBox = (vertices: readonly Vertex[]): { readonly min: Vec3; readonly max: Vec3 } | undefined => {
+  if (vertices.length === 0) return undefined;
+
+  return vertices.reduce(
+    (acc, vertex) => {
+      const { x, y, z } = vertex.position;
+      return {
+        min: createVec3(Math.min(acc.min.x, x), Math.min(acc.min.y, y), Math.min(acc.min.z, z)),
+        max: createVec3(Math.max(acc.max.x, x), Math.max(acc.max.y, y), Math.max(acc.max.z, z))
+      };
+    },
+    {
+      min: createVec3(Infinity, Infinity, Infinity),
+      max: createVec3(-Infinity, -Infinity, -Infinity)
+    }
+  );
 };
 ```
 
-As you see, this function will always accepts numerical information as inputs and produces strings, without any side-effects
+We have a consistent deterministic with no side effects (don't modify global state, don't perform I/O, don't mutate parameters) that produces the same output with the same input making it easily testable and predicitable to work with.
 
 
 ### Immutability
 
-The function below (located in ../shared/converters/obj.ts) pushes new elements into an array (we call it meshVertexIndices) and return the new length of that array
+We have an read only Scene Data type
 
 ```typescript
 
-meshVertexIndices.push(Object.freeze(perVert));
+export interface Scene {
+  readonly meshes: readonly Mesh[];
+  readonly materials: readonly Material[];
+  readonly metadata: {
+    readonly format: string;
+    readonly vertexCount: number;
+    readonly faceCount: number;
+    readonly boundingBox?: {
+      readonly min: Vec3;
+      readonly max: Vec3;
+    };
+  };
+}
 ```
 
-As you see, this function uses Object.freeze() function, which forbids any change to the array named "perVert". So while meshVertexIndices will keep getting new perVert data, the perVert data itself is immutable and it also make uses of an immutable data structure making sure data can only be read from and not editable where both immutability and pure functions benefit us by having a predictable and testable results.
+We make this into a read only because after we are done parsing, we would like this data to be saved as is and not interfer with the 3d viewing process (Consist of a lot of matrix and vertice transformation).  By making it read only when we can only use the data and pass it of to the 3d viewer for its viewing transformation without ever changing the original object so it can be used to convert the data type later.
 
 
-### High Order Function and Currying
+### High Order Function
 
-The code snippet below is the part of a function that converts a non-PLY 3D file into a 3D PLY file. This code snippet however, builds a large string by combining a header string with data processed from vertices and faces
-
+The code snippet below is the part of a function that would be used for validating process of a scene or mesh. That is located in `shared/validators/validators.ts (lines 21-33)`
 ```typescript 
-header=>header.concat(mapArray(formatVertex)(result.value.vertices)).concat(mapArray(formatFace)(result.value.faces)).join("\n")
+export const combine = <T>(
+  ...validators: ReadonlyArray<Validator<T>>
+): Validator<T> => {
+  return (value: T): Result<T, ValidationError> => {
+    for (const validator of validators) {
+      const result = validator(value);
+      if (!result.ok) {
+        return result;
+      }
+    }
+    return Ok(value);
+  };
+};
+```
+Snippet 2:
+```typescript
+export const validateNonEmpty = <T>(
+  items: readonly T[],
+  itemName: string
+): Result<readonly T[], ValidationError> => {
+  if (items.length === 0) {
+    return Err({
+      message: `${itemName} array cannot be empty`,
+      code: 'EMPTY_ARRAY',
+    });
+  }
+  return Ok(items);
+};
 ```
 
-This code snippet is an example of a high-order function. In the 'mapArray' part, the 'mapArray' accepts the function of 'formatVertex' as the input and the function of 'result.value.vertices' as the output.
-
-This code snippet, especially in mapArray arguments, summons a function that creates another function to receive the rest of the arguments. It's clearly an implementation of currying.
+This code snippet is an example of a high-order function. By using `combine`with our validation process, we can take different type of validators function as input such as `validateNonEmpty` and other validators and returns a value of in this case a boolean if it passes the process.
 
 
 ### **Monad for Error Handling**
