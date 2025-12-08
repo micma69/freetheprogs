@@ -188,30 +188,38 @@ export const validateMesh = (mesh: Mesh): Result<Mesh, ValidationError> => {
   return Ok(mesh);
 };
 
-/**
- * Validate that scene has valid structure
- */
-export const validateScene = (scene: Scene): Result<Scene, ValidationError> => {
+const validateSceneNotEmpty: Validator<Scene> = (scene) => {
   if (scene.meshes.length === 0) {
     return Err({
       message: 'Scene must have at least one mesh',
       code: 'EMPTY_SCENE',
     });
   }
+  return Ok(scene);
+};
 
-  // Validate all meshes
-  for (const mesh of scene.meshes) {
+
+const validateSceneMeshes: Validator<Scene> = (scene) => {
+  for (let i = 0; i < scene.meshes.length; i++) {
+    const mesh = scene.meshes[i];
     const meshResult = validateMesh(mesh);
     if (!meshResult.ok) {
-      return meshResult;
+      return Err({
+        ...meshResult.error,
+        path: `scene.meshes[${i}]${mesh.name ? `(${mesh.name})` : ''}`,
+      });
     }
   }
+  return Ok(scene);
+};
 
-  // Validate metadata consistency
+
+const validateSceneMetadata: Validator<Scene> = (scene) => {
   const totalVertices = scene.meshes.reduce(
     (sum, mesh) => sum + mesh.vertices.length,
     0
   );
+
   const totalFaces = scene.meshes.reduce(
     (sum, mesh) => sum + mesh.faces.length,
     0
@@ -235,6 +243,15 @@ export const validateScene = (scene: Scene): Result<Scene, ValidationError> => {
 
   return Ok(scene);
 };
+
+/**
+ * Validate that scene has valid structure
+ */
+export const validateScene = combine(
+  validateSceneNotEmpty,
+  validateSceneMeshes,
+  validateSceneMetadata
+);
 
 /**
  * Higher-order function: create a validator that checks non-empty arrays
