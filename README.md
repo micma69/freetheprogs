@@ -119,18 +119,23 @@ export const combine = <T>(
 ```
 Snippet 2:
 ```typescript
-export const validateNonEmpty = <T>(
-  items: readonly T[],
-  itemName: string
-): Result<readonly T[], ValidationError> => {
-  if (items.length === 0) {
+//Other Validators
+
+const validateSceneNotEmpty: Validator<Scene> = (scene) => {
+  if (scene.meshes.length === 0) {
     return Err({
-      message: `${itemName} array cannot be empty`,
-      code: 'EMPTY_ARRAY',
+      message: 'Scene must have at least one mesh',
+      code: 'EMPTY_SCENE',
     });
   }
-  return Ok(items);
+  return Ok(scene);
 };
+
+export const validateScene = combine(
+  validateSceneNotEmpty,
+  validateSceneMeshes,
+  validateSceneMetadata
+);
 ```
 
 This code snippet is an example of a high-order function. By using `combine`with our validation process, we can take different type of validators function as input such as `validateNonEmpty` and other validators and returns a value of in this case a boolean if it passes the process.
