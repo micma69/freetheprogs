@@ -180,3 +180,11 @@ export const takeArray = (count: number) => <T>(arr: readonly T[]): readonly T[]
 > The snippet located in `shared/parsers/ply.ts, lines 267-268, 271`
 
 In this project `takeArray`  is a function that takes a number count and returns a new function that takes an array and returns the first count elements of that array as opposed to the non curried implmentaiton `takeArray(count, arr)`.  With that type of implementation it makes functions more composable.
+
+
+
+We hope you will enjoy our app! Thank you and have a nice day!
+
+Best regards, 
+
+Team FreeTheProgs!
